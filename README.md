@@ -81,6 +81,9 @@ sudo apt install build-essential libsdl2-dev libsdl2-ttf-dev
 make            # produces ./simtower
 ```
 
+A PS Vita / vitaGL VPK build is documented in [`docs/VITA.md`](docs/VITA.md)
+(`make vita` with VitaSDK). That package does not include `SIMTOWER.EXE`.
+
 ## Providing the original EXE
 
 The game reads its art and sound directly from an original `SIMTOWER.EXE` every

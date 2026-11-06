@@ -25,10 +25,19 @@
 #include "audio.h"
 #include "sound_hook.h"
 #include "strings.h"
+#ifdef __vita__
+#include <strings.h>
+#include "vita_platform.h"
+#endif
 
 /* ---------- Window / display ---------- */
+#ifdef __vita__
+#define WINDOW_W    960
+#define WINDOW_H    544
+#else
 #define WINDOW_W    960
 #define WINDOW_H    720
+#endif
 #define HUD_HEIGHT  0     /* No separate HUD — info window handles it */
 #define MENU_BAR_H  18    /* Win3.1 menu bar across the top */
 #define MENU_ITEM_PAD 12  /* Horizontal padding for menu items (kept for dropdown code) */
@@ -9101,6 +9110,10 @@ static void cap_drag_track(void)
 /* ---------- Input handling ---------- */
 static void handle_event(SDL_Event *ev)
 {
+#ifdef __vita__
+    if (vita_remap_event(ev))
+        return;
+#endif
     /* Quit save-prompt: fully modal, topmost. */
     if (game.quit_confirm) {
         switch (ev->type) {
@@ -9875,6 +9888,13 @@ static void init_fonts(void)
      * wasm build's embedded copies (web/fonts/, SIL OFL) — they don't
      * exist natively and simply fall through to the system paths. */
     const char *font_paths[] = {
+#ifdef __vita__
+        "app0:fonts/LiberationSans-Bold.ttf",
+        "app0:/fonts/LiberationSans-Bold.ttf",
+        "app0:fonts/LiberationSans-Regular.ttf",
+        "app0:/fonts/LiberationSans-Regular.ttf",
+        "ux0:data/concilia-tower/LiberationSans-Bold.ttf",
+#endif
         "/fonts/LiberationSans-Bold.ttf",
         "/fonts/LiberationSans-Regular.ttf",
         "/usr/share/fonts/truetype/liberation/LiberationSans-Bold.ttf",
@@ -9887,6 +9907,10 @@ static void init_fonts(void)
     /* Dialog labels want the regular weight — bold 14 is wider than the
      * byte-exact DTMP label rects allow ("Length" clipped, 2026-08-23). */
     const char *dlg_paths[] = {
+#ifdef __vita__
+        "app0:fonts/LiberationSans-Regular.ttf",
+        "app0:/fonts/LiberationSans-Regular.ttf",
+#endif
         "/fonts/LiberationSans-Regular.ttf",
         "/usr/share/fonts/truetype/liberation/LiberationSans-Regular.ttf",
         "/usr/share/fonts/truetype/dejavu/DejaVuSans.ttf",
@@ -9982,9 +10006,22 @@ int main(int argc, char *argv[])
     const char *exe_path = NULL;
     int auto_screenshot = 0;
     const char *screenshot_path = "/tmp/simtower_screenshot.bmp";
+
+#ifdef __vita__
+    vita_boost_clocks();
+    vita_prepare_userdata();
+    vita_try_expand_ex_();
+#endif
     
     /* Find SIMTOWER.EXE */
     const char *search_paths[] = {
+#ifdef __vita__
+        "ux0:data/concilia-tower/SIMTOWER.EXE",
+        "ux0:data/concilia-tower/simtower.exe",
+        "ux0:data/SIMTOWER.EXE",
+        "app0:SIMTOWER.EXE",
+        "app0:/SIMTOWER.EXE",
+#endif
         "SIMTOWER.EXE",
         "data/SIMTOWER.EXE",
         "../OpenSkyscraper/data/SIMTOWER.EXE",
@@ -10016,6 +10053,11 @@ int main(int argc, char *argv[])
             exe_path = argv[i];
         }
     }
+
+#ifdef __vita__
+    if (!save_path_override)
+        save_path_override = vita_save_path();
+#endif
     
     if (!exe_path) {
         for (int i = 0; search_paths[i]; i++) {
@@ -10025,14 +10067,23 @@ int main(int argc, char *argv[])
     }
     
     if (!exe_path) {
+#ifdef __vita__
+        fprintf(stderr, "Cannot find SIMTOWER.EXE. Copy it to ux0:data/concilia-tower/\n");
+        return vita_missing_exe_screen();
+#else
         fprintf(stderr, "Cannot find SIMTOWER.EXE. Pass path as argument.\n");
         return 1;
+#endif
     }
     
 #ifndef CT_BUILD_VERSION
 #define CT_BUILD_VERSION "dev"
 #endif
+#ifdef __vita__
+    printf("ConciliaTower — SimTower for PS Vita (build %s)\n", CT_BUILD_VERSION);
+#else
     printf("ConciliaTower — SimTower for Linux (build %s)\n", CT_BUILD_VERSION);
+#endif
     printf("Loading resources from: %s\n", exe_path);
 
     /* Load NE resources */
@@ -10076,32 +10127,41 @@ int main(int argc, char *argv[])
     exe_strings_init(&game.exe);   /* 0x7f06 string tables + dialog texts */
     
     /* Initialize SDL */
+#ifdef __vita__
+    if (SDL_Init(SDL_INIT_VIDEO | SDL_INIT_AUDIO |
+                 SDL_INIT_JOYSTICK | SDL_INIT_GAMECONTROLLER) != 0) {
+#else
     if (SDL_Init(SDL_INIT_VIDEO | SDL_INIT_AUDIO) != 0) {
+#endif
         fprintf(stderr, "SDL_Init failed: %s\n", SDL_GetError());
         return 1;
     }
+#ifdef __vita__
+    vita_init_runtime();
+#endif
     
     game.screen_w = WINDOW_W;
     game.screen_h = WINDOW_H;
     Uint32 wflags = SDL_WINDOW_SHOWN;
-#ifndef __EMSCRIPTEN__
+#if !defined(__EMSCRIPTEN__) && !defined(__vita__)
     /* Fixed canvas on the web: under Emscripten RESIZABLE binds the
      * window to the canvas's CSS box, whose transition fired a
      * SIZE_CHANGED that shrank the render target to a dot (Jonah's
      * first web bug report, 2026-08-09). */
     wflags |= SDL_WINDOW_RESIZABLE;
 #endif
+#ifdef __vita__
+    wflags |= SDL_WINDOW_FULLSCREEN | SDL_WINDOW_OPENGL;
+#endif
     game.window = SDL_CreateWindow("ConciliaTower",
         SDL_WINDOWPOS_CENTERED, SDL_WINDOWPOS_CENTERED,
         WINDOW_W, WINDOW_H, wflags);
     
     /* Software renderer for VNC visibility */
-#ifdef __EMSCRIPTEN__
-    /* In a browser the software renderer means CPU-compositing every frame
-     * inside wasm — Jonah's beta tab ran at ~25fps, which stretched the
-     * tick-paced sounds and starved the audio callback (2026-08-10). WebGL
-     * does it on the GPU; TARGETTEXTURE is for texture_to_surface's
-     * readback path in sprite loading. */
+#if defined(__EMSCRIPTEN__) || defined(__vita__)
+    /* EMSCRIPTEN: wasm software renderer was too slow (Jonah, 2026-08-10).
+     * VITA: sdl2_vitagl accelerated renderer. TARGETTEXTURE is required
+     * for sprites.c texture_to_surface readback. */
     game.renderer = SDL_CreateRenderer(game.window, -1,
         SDL_RENDERER_ACCELERATED | SDL_RENDERER_TARGETTEXTURE);
     if (!game.renderer)
@@ -11037,7 +11097,12 @@ int main(int argc, char *argv[])
     printf("  Tab/Shift+Tab: cycle through all types\n");
     printf("  Space: pause/unpause, +/-: speed up/slow down\n");
     printf("  F3: analytics graphs, F4: tuning/modding panel\n");
-    printf("  ` (backtick): toggle debug labels, F12: screenshot, Q: quit (Esc closes windows)\n\n");
+    printf("  ` (backtick): toggle debug labels, F12: screenshot, Q: quit (Esc closes windows)\n");
+#ifdef __vita__
+    printf("  Vita: touch = mouse, analog/D-pad = pan, Cross = confirm, Circle = back,\n");
+    printf("        Start = pause, L/R = speed, Triangle = save, Select = debug labels\n");
+#endif
+    printf("\n");
     
     /* Seed the finance quarter baseline so the first report (before any 3-day
      * settlement snapshots it) reads sensibly instead of a $0 opening balance. */
@@ -11057,6 +11122,10 @@ int main(int argc, char *argv[])
         while (SDL_PollEvent(&ev)) {
             handle_event(&ev);
         }
+#ifdef __vita__
+        vita_pan_camera(&game.cam_fx, &game.cam_fy);
+        clamp_camera();
+#endif
 
         /* Build-drag clatter (#7001, referee row 18): a looping sound that
          * rings while a build is being dragged out and stops on release.

@@ -4235,7 +4235,7 @@ int game_save(const GameSim *sim, const Tower *tower, const char *path)
  * layout only — the wasm32 build has different alignment, so binary
  * .sav files are architecture-specific and pre-v16 native saves can
  * never appear in a browser FS anyway. .TDT is the portable format. */
-#ifndef __EMSCRIPTEN__
+#if !defined(__EMSCRIPTEN__) && !defined(__vita__)
 _Static_assert(sizeof(Tenant) == 108, "v15 repack: Tenant layout moved");
 _Static_assert(offsetof(Tenant, zone) == 36, "v15 repack: cut point moved");
 _Static_assert(offsetof(GameSim, santa) == 384, "v15 repack: zones cut moved");

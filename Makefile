@@ -14,7 +14,7 @@ BIN = simtower
 # Default SIMTOWER.EXE location
 EXE_PATH ?= ../OpenSkyscraper/data/SIMTOWER.EXE
 
-.PHONY: all clean run web webserve
+.PHONY: all clean run web webserve vita
 
 all: $(BIN)
 
@@ -59,3 +59,12 @@ webserve: web
 clean:
 	rm -f $(OBJ) $(BIN)
 	rm -rf $(WEBDIR)
+
+# ---- PS Vita / vitaGL VPK (requires VITASDK + sdl2_vitagl, sdl2_ttf) ----
+vita:
+	@test -n "$$VITASDK" || (echo "Set VITASDK to your VitaSDK path" && exit 1)
+	cmake -S . -B build-vita -G Ninja -DCMAKE_BUILD_TYPE=Release \
+	  -DCMAKE_TOOLCHAIN_FILE="$$VITASDK/share/vita.toolchain.cmake"
+	cmake --build build-vita -j$$(nproc)
+	@echo "VPK: build-vita/concilia-tower.vpk"
+
