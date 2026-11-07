@@ -16,3 +16,13 @@ tests/web/out-probe/
 /build-vita/
 *.vpk
 *.self
+
+# User-supplied game media and proprietary system modules (never package/commit)
+/simtower_cd.iso
+*.iso
+SIMTOWER.EX*
+*.suprx
+# Case variants on case-sensitive host filesystems
+*.[iI][sS][oO]
+[sS][iI][mM][tT][oO][wW][eE][rR].[eE][xX]*
+*.[sS][uU][pP][rR][xX]
