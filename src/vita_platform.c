@@ -20,6 +20,7 @@
 #include "exe_prepare.h"
 #include "text_cache.h"
 #include "save_store.h"
+#include "cursor.h"
 #include <psp2/touch.h>
 
 #include <SDL_ttf.h>
@@ -123,7 +124,7 @@ void vita_boot_begin(void)
     /* Keep last run available even if the new run fails very early. */
     sceIoRemove(CT_DATA_DIR "/boot.previous.log");
     sceIoRename(CT_DATA_DIR "/boot.log", CT_DATA_DIR "/boot.previous.log");
-    vita_boot_log("Concilia Tower v0.8 APP_VER=00.08 build=%s: app start", CT_BUILD_VERSION);
+    vita_boot_log("Concilia Tower v0.9 APP_VER=00.09 build=%s: app start", CT_BUILD_VERSION);
     vita_boot_log("kernel process clock available; mkdir ux0:data=0x%08x data dir=0x%08x; log writable=%d",
                   data_rc, dir_rc, log_writable);
     vita_boot_log("newlib heap=%u MiB; startup diagnostics use no SDL/GL", _newlib_heap_size_user >> 20);
@@ -254,7 +255,7 @@ void vita_init_runtime(void)
     int rc=sceTouchSetSamplingState(SCE_TOUCH_PORT_FRONT,SCE_TOUCH_SAMPLING_STATE_START);
     memset(&front_panel,0,sizeof(front_panel));
     int panel_rc=sceTouchGetPanelInfo(SCE_TOUCH_PORT_FRONT,&front_panel);
-    vita_boot_log("input v0.8: LEFT=camera RIGHT=cursor D-pad=fine pointer Cross/R=left-drag L=right Circle=Hand Triangle=Inspect Square=Bulldozer Start=menu; controller=%p",(void*)controller);
+    vita_boot_log("input v0.9: LEFT=camera RIGHT=cursor D-pad=fine pointer Cross/R=left-drag L=right Circle=Hand Triangle=Inspect Square=Bulldozer Start=menu; UI D-pad=focus Cross/Circle=confirm Triangle=cancel; build D-pad=one cell/floor repeat; controller=%p",(void*)controller);
     vita_boot_log("front touch manual normalized->960x544; SDL synthetic mouse disabled; sampling=0x%x panel=0x%x area=%d,%d..%d,%d",rc,panel_rc,front_panel.minAaX,front_panel.minAaY,front_panel.maxAaX,front_panel.maxAaY);
 }
 void vita_input_event(const SDL_Event *ev,CT_InputSink sink)
@@ -311,7 +312,12 @@ int vita_update_input(double dt,float *cx,float *cy,CT_InputSink sink)
     }
     return CT_InputStep(&pointer,(float)dt,lx,ly,rx,ry,cx,cy,sink);
 }
-void vita_draw_cursor(SDL_Renderer *r) { CT_InputDraw(&pointer,r); }
+void vita_ui_navigation(int active) { pointer.ui_nav=active; }
+void vita_pointer_move(int x,int y,CT_InputSink sink) { CT_InputMove(&pointer,x,y,sink); }
+static CT_CursorBank cursor_bank;
+void vita_load_cursors(SDL_Renderer *r,NEResourceTable *exe)
+{ vita_boot_log("Loading native EXE cursor groups 1002=build,1003=inspect,1004=hand,1005=bulldoze; loaded=%d",CT_CursorsLoad(&cursor_bank,r,exe)); }
+void vita_draw_cursor(SDL_Renderer *r,int kind) { CT_CursorsDraw(&cursor_bank,&pointer,r,kind); }
 void vita_present(SDL_Renderer *r)
 {
     Uint64 a=SDL_GetPerformanceCounter();SDL_RenderPresent(r);
@@ -349,7 +355,7 @@ void vita_boot_notice(const char *message)
     reserve_error_frame();
     if (error_frame_reserved) sceDisplaySetFrameBuf(&error_frame, SCE_DISPLAY_SETBUF_NEXTFRAME);
     if (debug_screen_active)
-        psvDebugScreenPrintf("\e[2J\e[1;1HConcilia Tower v0.8\n\n%s\n\nLog: ux0:data/concilia-tower/boot.log\n", message);
+        psvDebugScreenPrintf("\e[2J\e[1;1HConcilia Tower v0.9\n\n%s\n\nLog: ux0:data/concilia-tower/boot.log\n", message);
 }
 
 void vita_boot_notice_end(void)
@@ -369,7 +375,7 @@ int vita_boot_fatal(const char *reason)
     int rc = error_frame_reserved ? sceDisplaySetFrameBuf(&error_frame, SCE_DISPLAY_SETBUF_NEXTFRAME) : -1;
     vita_boot_log("reserved direct framebuffer error screen restore=0x%08x", rc);
     if (rc >= 0) {
-        psvDebugScreenPrintf("\e[2J\e[1;1HConcilia Tower v0.8 - startup stopped\n\n%s\nSDL diagnostic (may be stale): %s\n\n", reason, error);
+        psvDebugScreenPrintf("\e[2J\e[1;1HConcilia Tower v0.9 - startup stopped\n\n%s\nSDL diagnostic (may be stale): %s\n\n", reason, error);
         psvDebugScreenPrintf("Log: ux0:data/concilia-tower/boot.log\nLog writable: %s\n\n", log_writable ? "yes" : "NO - check free space/write access");
         psvDebugScreenPrintf("EXE search (FOUND = detected, not yet validated):\n%s\n", search_report);
         psvDebugScreenPrintf("\nSend boot.log and a photo of this screen.\nRelease buttons, then press START or Circle to exit.\n");

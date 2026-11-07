@@ -46,3 +46,11 @@ void CT_ViewScreenPoint(const CT_WorldView *v,int wx,int wy,int cx,int cy,int *x
 }
 float CT_ViewHalfWidth(const CT_WorldView *v) { return v->screen_w/(2*v->zoom); }
 float CT_ViewHalfHeight(const CT_WorldView *v) { return v->screen_h/(2*v->zoom); }
+
+void CT_ViewSnapStep(const CT_WorldView *v,int x,int y,int cx,int cy,int dir,int cw,int ch,int *wx,int *wy)
+{
+    CT_ViewWorldPoint(v,x,y,cx,cy,wx,wy);
+    int gx=(int)floor((double)*wx/cw),gy=(int)floor((double)*wy/ch);
+    gx+=(dir==1)-(dir==0);gy+=(dir==3)-(dir==2);
+    *wx=gx*cw+cw/2;*wy=gy*ch+ch/2;
+}

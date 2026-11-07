@@ -5,6 +5,7 @@
 #include "texture.h"
 typedef void (*CT_InputSink)(SDL_Event *);
 typedef struct {
+    int confirm_cross; int ui_nav; float nav_repeat;
     float x,y,hold,nudge_hold;
     int w,h,last_x,last_y,visible,cross,rtrigger,secondary,touch,focused;
     unsigned dpad,last_click_ms,last_click_count;
@@ -17,6 +18,7 @@ void CT_InputInit(CT_VitaInput *,int,int,SDL_TouchID);
 int CT_InputEvent(CT_VitaInput *,const SDL_Event *,CT_InputSink);
 void CT_InputTouch(CT_VitaInput *,int,float,float,SDL_FingerID,CT_InputSink);
 int CT_InputStep(CT_VitaInput *,float,int,int,int,int,float *,float *,CT_InputSink);
+void CT_InputMove(CT_VitaInput *,int,int,CT_InputSink);
 void CT_InputDraw(CT_VitaInput *,SDL_Renderer *);
 typedef struct { double accumulator; unsigned phase; } CT_SimClock;
 int CT_SimSteps(CT_SimClock *,double dt,int speed);

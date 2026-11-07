@@ -29,6 +29,12 @@ int main(void)
     CT_InputStep(&p,1.f/60,0,0,32767,0,&cx,&cy,collect);
     assert(events[count-1].motion.state&SDL_BUTTON_LMASK);
     button(&p,SDL_CONTROLLER_BUTTON_RIGHTSHOULDER,0);assert(events[count-1].type==SDL_MOUSEBUTTONUP);
+    p.ui_nav=1;oldcx=p.x;button(&p,SDL_CONTROLLER_BUTTON_DPAD_LEFT,1);assert(p.x==oldcx && events[count-1].key.keysym.sym==SDLK_F16);
+    int repeats=count;for(int i=0;i<60;i++) CT_InputStep(&p,1.f/60,0,0,0,0,&cx,&cy,collect);assert(count>repeats && p.x==oldcx);
+    button(&p,SDL_CONTROLLER_BUTTON_DPAD_LEFT,0);button(&p,SDL_CONTROLLER_BUTTON_A,1);assert(events[count-1].type==SDL_KEYDOWN && events[count-1].key.keysym.sym==SDLK_RETURN && !p.cross);
+    p.ui_nav=0;button(&p,SDL_CONTROLLER_BUTTON_A,0);assert(events[count-1].type==SDL_KEYUP && !p.confirm_cross);
+    p.ui_nav=2;button(&p,SDL_CONTROLLER_BUTTON_A,1);assert(events[count-1].type==SDL_MOUSEBUTTONDOWN && p.cross);button(&p,SDL_CONTROLLER_BUTTON_A,0);assert(events[count-1].type==SDL_MOUSEBUTTONUP);
+    p.ui_nav=0;
     oldcx=p.x;button(&p,SDL_CONTROLLER_BUTTON_DPAD_LEFT,1);assert(p.x==oldcx-2);
     button(&p,SDL_CONTROLLER_BUTTON_DPAD_LEFT,0);
     button(&p,SDL_CONTROLLER_BUTTON_START,1);assert(events[count-1].key.keysym.sym==SDLK_F10);

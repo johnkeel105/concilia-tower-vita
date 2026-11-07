@@ -13,6 +13,13 @@ static void motion(CT_VitaInput *p,CT_InputSink sink)
     e.motion.xrel=p->last_x<0?0:x-p->last_x;e.motion.yrel=p->last_y<0?0:y-p->last_y;
     e.motion.state=buttons(p);p->last_x=x;p->last_y=y;sink(&e);
 }
+void CT_InputMove(CT_VitaInput *p,int x,int y,CT_InputSink sink)
+{ p->x=SDL_max(0,SDL_min(x,p->w-1));p->y=SDL_max(0,SDL_min(y,p->h-1));p->visible=1;motion(p,sink); }
+static void nav_key(int direction,int down,CT_InputSink sink)
+{
+    SDL_Event e;SDL_zero(e);e.type=down?SDL_KEYDOWN:SDL_KEYUP;e.key.state=down?SDL_PRESSED:SDL_RELEASED;
+    e.key.keysym.sym=SDLK_F16+direction;sink(&e);
+}
 static void edge(CT_VitaInput *p,int button,int was,int now,CT_InputSink sink)
 {
     if(was==now) return;
@@ -61,12 +68,12 @@ int CT_InputEvent(CT_VitaInput *p,const SDL_Event *ev,CT_InputSink sink)
     }
     if(ev->type==SDL_CONTROLLERDEVICEREMOVED) {
         int left=p->cross||p->rtrigger||p->touch,right=p->secondary;
-        p->cross=p->rtrigger=p->secondary=0;p->dpad=0;
+        p->cross=p->rtrigger=p->secondary=p->confirm_cross=0;p->dpad=0;
         edge(p,SDL_BUTTON_LEFT,left,p->touch,sink);edge(p,SDL_BUTTON_RIGHT,right,0,sink);
     }
     if(ev->type==SDL_WINDOWEVENT && ev->window.event==SDL_WINDOWEVENT_FOCUS_LOST) {
         int left=p->cross||p->rtrigger||p->touch,right=p->secondary;
-        p->cross=p->rtrigger=p->secondary=p->touch=0;p->dpad=0;p->focused=0;p->hold=0;
+        p->cross=p->rtrigger=p->secondary=p->touch=p->confirm_cross=0;p->dpad=0;p->focused=0;p->hold=0;
         edge(p,SDL_BUTTON_LEFT,left,0,sink);edge(p,SDL_BUTTON_RIGHT,right,0,sink);
     }
     if(ev->type==SDL_WINDOWEVENT && ev->window.event==SDL_WINDOWEVENT_FOCUS_GAINED) p->focused=1;
@@ -74,6 +81,9 @@ int CT_InputEvent(CT_VitaInput *p,const SDL_Event *ev,CT_InputSink sink)
     int down=ev->type==SDL_CONTROLLERBUTTONDOWN,b=ev->cbutton.button;
     if(!p->focused) return 1;
     p->visible=1;motion(p,sink);
+    if(b==SDL_CONTROLLER_BUTTON_A && ((p->ui_nav==1 && down) || p->confirm_cross)) {
+        SDL_Event e;SDL_zero(e);p->confirm_cross=down;e.type=down?SDL_KEYDOWN:SDL_KEYUP;e.key.state=down?SDL_PRESSED:SDL_RELEASED;e.key.keysym.sym=SDLK_RETURN;sink(&e);return 1;
+    }
     if(b==SDL_CONTROLLER_BUTTON_A || b==SDL_CONTROLLER_BUTTON_RIGHTSHOULDER) {
         int was=p->cross||p->rtrigger||p->touch;
         if(b==SDL_CONTROLLER_BUTTON_A) p->cross=down;else p->rtrigger=down;edge(p,SDL_BUTTON_LEFT,was,p->cross||p->rtrigger||p->touch,sink);return 1;
@@ -89,7 +99,10 @@ int CT_InputEvent(CT_VitaInput *p,const SDL_Event *ev,CT_InputSink sink)
     case SDL_CONTROLLER_BUTTON_DPAD_DOWN:bit=8;dy=2;break;
     }
     if(bit) {
-        if(down && !(p->dpad&bit)) { p->x+=dx;p->y+=dy;clamp(p);motion(p,sink);p->nudge_hold=0; }
+        if(p->ui_nav) {
+            if(down && !(p->dpad&bit)) { nav_key(bit==1?0:bit==2?1:bit==4?2:3,1,sink);p->nav_repeat=-0.30f; }
+            if(!down) nav_key(bit==1?0:bit==2?1:bit==4?2:3,0,sink);
+        } else if(down && !(p->dpad&bit)) { p->x+=dx;p->y+=dy;clamp(p);motion(p,sink);p->nudge_hold=0; }
         if(down) p->dpad|=bit;else p->dpad&=~bit;
         return 1;
     }
@@ -122,7 +135,11 @@ int CT_InputStep(CT_VitaInput *p,float dt,int lx,int ly,int rx,int ry,float *cx,
         p->x+=(55*x+600*x*fabsf(x))*dt*accel;
         p->y+=(55*y+600*y*fabsf(y))*dt*accel;p->visible=1;
     } else p->hold=0;
-    if(p->dpad) {
+    if(p->dpad && p->ui_nav) {
+        p->nav_repeat+=dt;
+        if(p->nav_repeat>=0.14f) { int d=(p->dpad&1)?0:(p->dpad&2)?1:(p->dpad&4)?2:3;nav_key(d,1,sink);p->nav_repeat=0; }
+    }
+    if(p->dpad && !p->ui_nav) {
         p->nudge_hold+=dt;
         if(p->nudge_hold>0.25f) {
             p->x+=((!!(p->dpad&2))-(!!(p->dpad&1)))*80*dt;
@@ -140,16 +157,19 @@ void CT_InputDraw(CT_VitaInput *p,SDL_Renderer *r)
         SDL_Surface *s=SDL_CreateRGBSurfaceWithFormat(0,16,24,32,SDL_PIXELFORMAT_ARGB8888);
         if(!s) return;
         SDL_FillRect(s,NULL,0);
-        for(int y=0;y<19;y++) for(int x=0;x<=y/2 && x<10;x++) {
-            Uint32 *row=(Uint32 *)((Uint8 *)s->pixels+y*s->pitch);
-            row[x]=(x==0 || x==y/2 || y==18)?0xff000000u:0xffffffffu;
-        }
-        for(int y=12;y<23;y++) for(int x=4;x<8;x++) {
-            Uint32 *row=(Uint32 *)((Uint8 *)s->pixels+y*s->pitch);
-            row[x]=(x==4 || x==7 || y==22)?0xff000000u:0xffffffffu;
+        /* Standard outlined arrow with a diagonal stem, not the old detached
+         * vertical rectangle that produced the glitched-looking tail. */
+        static const char *arrow[]={
+            "X               ","XX              ","X.X             ","X..X            ",
+            "X...X           ","X....X          ","X.....X         ","X......X        ",
+            "X.......X       ","X.....XXXXX     ","X..X..X         ","X.X X..X        ",
+            "XX  X..X        ","X    X..X       ","     X..X       ","      XX        "};
+        for(int y=0;y<16;y++) for(int x=0;x<16;x++) {
+            Uint32 *row=(Uint32*)((Uint8*)s->pixels+y*s->pitch);
+            if(arrow[y][x]!=' ') row[x]=arrow[y][x]=='X'?0xff000000u:0xffffffffu;
         }
         p->cursor=CT_CreateTextureFromSurface(r,s);SDL_FreeSurface(s);
-        if(p->cursor) CT_SetTextureBlendMode(p->cursor,SDL_BLENDMODE_BLEND);
+        if(p->cursor) { CT_SetTextureBlendMode(p->cursor,SDL_BLENDMODE_BLEND);CT_SetTextureScaleMode(p->cursor,SDL_ScaleModeNearest); }
     }
     SDL_Rect old;SDL_bool clipped=SDL_RenderIsClipEnabled(r);SDL_RenderGetClipRect(r,&old);
     SDL_RenderSetClipRect(r,NULL);

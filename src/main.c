@@ -19,6 +19,9 @@
 #include "sprites.h"
 #include "text_cache.h"
 #include "world_view.h"
+#include "ui_scale.h"
+#include "ui_focus.h"
+#include "cursor.h"
 #include "save_store.h"
 #include "tower.h"
 #include "game.h"
@@ -847,6 +850,10 @@ static const CloudPos CLOUD_POSITIONS[] = {
 #ifdef __vita__
 static CT_WorldView world_view;
 static int world_native_pass;
+static CT_UIScale ui_scale;
+static void vita_ui_focus_draw(void);
+static int vita_ui_collect(void);
+static int vita_scaled_ui=1;
 #endif
 
 /* ---------- Coordinate conversion ---------- */
@@ -2582,6 +2589,26 @@ static TuneRow tune_rows[] = {
 #define TUNE_W      330
 #define TUNE_ROW_H  19
 
+#ifdef __vita__
+static int tune_page;
+#endif
+static int tune_first_row(void)
+{
+#ifdef __vita__
+    return tune_page*20;
+#else
+    return 0;
+#endif
+}
+static int tune_visible_rows(void)
+{
+#ifdef __vita__
+    return SDL_min(20,TUNE_ROWS-tune_first_row());
+#else
+    return TUNE_ROWS;
+#endif
+}
+
 static void tune_window_origin(int *x, int *y)
 {
     if (game.tune_x >= 0) { *x = game.tune_x; *y = game.tune_y; return; }
@@ -2595,14 +2622,14 @@ static int tuning_click(int mx, int my)
     if (!game.show_tuning) return 0;
     int wx, wy;
     tune_window_origin(&wx, &wy);
-    int body_h = 26 + TUNE_ROWS * TUNE_ROW_H + 30;
+    int body_h = 26 + tune_visible_rows() * TUNE_ROW_H + 30;
     if (mx < wx || mx >= wx + TUNE_W ||
         my < wy || my >= wy + WIN_TITLEBAR_H + body_h) return 0;
 
     int top = wy + WIN_TITLEBAR_H + 22;
     int row = (my - top) / TUNE_ROW_H;
-    if (my >= top && row >= 0 && row < TUNE_ROWS) {
-        TuneRow *r = &tune_rows[row];
+    if (my >= top && row >= 0 && row < tune_visible_rows()) {
+        TuneRow *r = &tune_rows[row+tune_first_row()];
         if (mx >= wx + TUNE_W - 52 && mx < wx + TUNE_W - 34) {
             *r->v -= r->step;
             if (*r->v < r->min) *r->v = r->min;
@@ -2613,7 +2640,13 @@ static int tuning_click(int mx, int my)
         return 1;
     }
     /* Reset button strip at the bottom */
-    int ry = top + TUNE_ROWS * TUNE_ROW_H + 4;
+    int ry = top + tune_visible_rows() * TUNE_ROW_H + 4;
+#ifdef __vita__
+    if(my>=ry && my<ry+20) {
+        if(mx>=wx+170 && mx<wx+235 && tune_page>0) {tune_page--;return 1;}
+        if(mx>=wx+250 && mx<wx+315 && tune_first_row()+20<TUNE_ROWS) {tune_page++;return 1;}
+    }
+#endif
     if (my >= ry && my < ry + 20 && mx >= wx + 8 && mx < wx + 150) {
         tuning_reset();
         return 1;
@@ -2772,7 +2805,7 @@ static void render_tuning_window(void)
     if (!game.show_tuning) return;
     int wx, wy;
     tune_window_origin(&wx, &wy);
-    int body_h = 26 + TUNE_ROWS * TUNE_ROW_H + 30;
+    int body_h = 26 + tune_visible_rows() * TUNE_ROW_H + 30;
 
     draw_win31_titlebar(wx, wy, TUNE_W, "Tuning (EXE master values)");
     SDL_Rect body = { wx, wy + WIN_TITLEBAR_H, TUNE_W, body_h };
@@ -2786,7 +2819,7 @@ static void render_tuning_window(void)
                 (SDL_Color){ 70, 70, 70, 255 });
 
     int top = wy + WIN_TITLEBAR_H + 22;
-    for (int i = 0; i < TUNE_ROWS; i++) {
+    for (int i = 0; i < tune_visible_rows(); i++) {
         int ry = top + i * TUNE_ROW_H;
         stats_label(wx + 8, ry + 1, tune_rows[i].label,
                     (SDL_Color){ 0, 0, 0, 255 });
@@ -2810,7 +2843,7 @@ static void render_tuning_window(void)
         SDL_RenderDrawLine(game.renderer, plus.x + plus.w / 2, plus.y + 3,
                            plus.x + plus.w / 2, plus.y + plus.h - 4);
     }
-    int ry = top + TUNE_ROWS * TUNE_ROW_H + 4;
+    int ry = top + tune_visible_rows() * TUNE_ROW_H + 4;
     SDL_Rect reset = { wx + 8, ry, 142, 20 };
     SDL_SetRenderDrawColor(game.renderer, 168, 168, 168, 255);
     SDL_RenderFillRect(game.renderer, &reset);
@@ -2818,6 +2851,15 @@ static void render_tuning_window(void)
     SDL_RenderDrawRect(game.renderer, &reset);
     stats_label(reset.x + 10, reset.y + 2, "Reset to EXE values",
                 (SDL_Color){ 0, 0, 0, 255 });
+#ifdef __vita__
+    for(int i=0;i<2;i++) {
+        SDL_Rect b={wx+(i?250:170),ry,65,20};
+        SDL_SetRenderDrawColor(game.renderer,168,168,168,255);SDL_RenderFillRect(game.renderer,&b);
+        SDL_SetRenderDrawColor(game.renderer,60,60,60,255);SDL_RenderDrawRect(game.renderer,&b);
+        int enabled=i?tune_first_row()+20<TUNE_ROWS:tune_page>0;
+        stats_label(b.x+8,b.y+2,i?"Next":"Prev",enabled?(SDL_Color){0,0,0,255}:(SDL_Color){120,120,120,255});
+    }
+#endif
 }
 
 /* ---------- Elevator dialog (ElvDlogT, seg_1098) ----------
@@ -5243,6 +5285,21 @@ static void tool_button_rect(int i, int *bx, int *by)
     *by = tool_grid_origin_y() + row * (TOOL_BTN_SIZE + TOOL_BTN_PAD);
 }
 
+#ifdef __vita__
+static int tool_popup_width(void) { return game.tool_popup>=0 ? TOOL_WIN_W+40 : TOOL_WIN_W; }
+static CT_UIPanel tool_panel(void)
+{ return CT_UIPanelGeometry((SDL_Rect){game.tool_x,game.tool_y,tool_popup_width(),tool_win_height()},vita_scaled_ui?1.25f:1.0f); }
+static CT_UIPanel info_panel(void)
+{ return CT_UIPanelGeometry((SDL_Rect){game.info_x,game.info_y,INFO_BAR_W,WIN_TITLEBAR_H+INFO_BAR_H},vita_scaled_ui?1.1f:1.0f); }
+static void clamp_vita_panels(void)
+{
+    CT_UIPanelClamp(&game.tool_x,&game.tool_y,tool_popup_width(),tool_win_height(),vita_scaled_ui?1.25f:1,MENU_BAR_H);
+    CT_UIPanelClamp(&game.info_x,&game.info_y,INFO_BAR_W,WIN_TITLEBAR_H+INFO_BAR_H,vita_scaled_ui?1.1f:1,MENU_BAR_H);
+    if(game.elv_open) CT_UIPanelClamp(&game.elv_x,&game.elv_y,ELV_DLG_W,WIN_TITLEBAR_H+ELV_DLG_H+ELV_RIDERS_H,1,MENU_BAR_H);
+    if(game.fin_open) CT_UIPanelClamp(&game.fin_x,&game.fin_y,FIN_DLG_W,WIN_TITLEBAR_H+FIN_DLG_H,1,MENU_BAR_H);
+}
+#endif
+
 /* Rect of sub-item j (0-based) in the pull-down for group button i — a vertical
  * column directly below the group button. */
 static void tool_sub_rect(int i, int j, int *bx, int *by)
@@ -5251,6 +5308,13 @@ static void tool_sub_rect(int i, int j, int *bx, int *by)
     tool_button_rect(i, &gx, &gy);
     *bx = gx;
     *by = gy + (j + 1) * (TOOL_BTN_SIZE + TOOL_BTN_PAD);
+#ifdef __vita__
+    /* Side flyout avoids bottom clipping as the Tools palette grows. */
+    *bx=game.tool_x+TOOL_WIN_W+4;
+    int count=tool_sub_visible_count(i);
+    int bottom=game.tool_y+tool_win_height()-count*TOOL_BTN_SIZE-4;
+    *by=SDL_max(game.tool_y+WIN_TITLEBAR_H,SDL_min(gy,bottom))+j*TOOL_BTN_SIZE;
+#endif
 }
 
 /* Draw one 32×32 item icon (from ui_items) with a raised/sunken 3D border. */
@@ -5662,8 +5726,22 @@ static void render_ui(void)
     /* Sub-windows (matching original SimTower layout); each can be hidden
      * from the Windows menu (original ids 40014-40016) */
     if (game.win_map)     render_minimap();      /* Top left */
-    if (game.win_toolbar) render_toolbox();      /* Left, below map */
-    if (game.win_infobar) render_info_window();  /* Top right, horizontal strip */
+#ifdef __vita__
+    clamp_vita_panels();
+    if(game.win_toolbar) {
+        if(vita_scaled_ui && CT_UIScaleBegin(&ui_scale,game.renderer,tool_panel())==0) {
+            render_toolbox();if(CT_UIScaleEnd(&ui_scale,game.renderer)<0) CT_BOOT("Tools panel present failed: %s",SDL_GetError());
+        } else { if(vita_scaled_ui) CT_BOOT("UI scaling unavailable: %s; falling back to native size",SDL_GetError());vita_scaled_ui=0;render_toolbox(); }
+    }
+    if(game.win_infobar) {
+        if(vita_scaled_ui && CT_UIScaleBegin(&ui_scale,game.renderer,info_panel())==0) {
+            render_info_window();if(CT_UIScaleEnd(&ui_scale,game.renderer)<0) CT_BOOT("Info panel present failed: %s",SDL_GetError());
+        } else { vita_scaled_ui=0;render_info_window(); }
+    }
+#else
+    if (game.win_toolbar) render_toolbox();
+    if (game.win_infobar) render_info_window();
+#endif
 }
 
 /* Construction crane — the EXE's real rule (OverlayT seg_11c0).
@@ -8444,7 +8522,8 @@ static void render(void)
     }
 #endif
 #ifdef __vita__
-    vita_draw_cursor(game.renderer);
+    vita_ui_focus_draw();
+    vita_draw_cursor(game.renderer,game.demolish_mode?CT_CURSOR_BULLDOZER:game.inspect_mode?CT_CURSOR_INSPECT:game.finger_mode?CT_CURSOR_HAND:game.build_type!=ITEM_NONE?CT_CURSOR_BUILD:CT_CURSOR_ARROW);
     vita_present(game.renderer);
 #else
     SDL_RenderPresent(game.renderer);
@@ -8649,6 +8728,11 @@ static void select_action_tool(int tool,int toggle)
 /* ---------- Toolbox click helper ---------- */
 static int toolbox_click(int mx, int my)
 {
+#ifdef __vita__
+    CT_UIPanel p=tool_panel();
+    if(!CT_UIPanelHit(p,mx,my)) return 0;
+    CT_UIPanelPoint(p,&mx,&my);
+#endif
     if (!game.win_toolbar) return 0;
     int wx = game.tool_x;
     int wy = game.tool_y + WIN_TITLEBAR_H;  /* Skip title bar */
@@ -8741,6 +8825,11 @@ static int titlebar_hit_test(int mx, int my)
 {
     /* Info bar title bar (only the thin title strip, not the whole bar) */
     if (game.win_infobar &&
+#ifndef __vita__
+        1 &&
+#else
+        0 &&
+#endif
         mx >= game.info_x && mx < game.info_x + INFO_BAR_W &&
         my >= game.info_y && my < game.info_y + WIN_TITLEBAR_H) {
         return 1;
@@ -8755,6 +8844,11 @@ static int titlebar_hit_test(int mx, int my)
 
     /* Toolbox title bar */
     if (game.win_toolbar &&
+#ifndef __vita__
+        1 &&
+#else
+        0 &&
+#endif
         mx >= game.tool_x && mx < game.tool_x + TOOL_WIN_W &&
         my >= game.tool_y && my < game.tool_y + WIN_TITLEBAR_H) {
         return 3;
@@ -8792,6 +8886,14 @@ static int titlebar_hit_test(int mx, int my)
             return 6;
     }
 
+#ifdef __vita__
+    CT_UIPanel info=info_panel(),tools=tool_panel();
+    info.dst.h=(int)lroundf(WIN_TITLEBAR_H*(vita_scaled_ui?1.1f:1));
+    tools.dst.h=(int)lroundf(WIN_TITLEBAR_H*(vita_scaled_ui?1.25f:1));
+    tools.dst.w=(int)lroundf(TOOL_WIN_W*(vita_scaled_ui?1.25f:1));
+    if(game.win_infobar && CT_UIPanelHit(info,mx,my)) return 1;
+    if(game.win_toolbar && CT_UIPanelHit(tools,mx,my)) return 3;
+#endif
     return 0;
 }
 
@@ -8799,8 +8901,17 @@ static int titlebar_hit_test(int mx, int my)
  * Used to prevent clicks from falling through to the game world. */
 static int point_in_any_window(int mx, int my)
 {
+#ifdef __vita__
+    if(game.win_infobar && CT_UIPanelHit(info_panel(),mx,my)) return 1;
+    if(game.win_toolbar && CT_UIPanelHit(tool_panel(),mx,my)) return 1;
+#endif
     /* Info bar */
     if (game.win_infobar &&
+#ifndef __vita__
+        1 &&
+#else
+        0 &&
+#endif
         mx >= game.info_x && mx < game.info_x + INFO_BAR_W &&
         my >= game.info_y && my < game.info_y + INFO_BAR_H + WIN_TITLEBAR_H) {
         return 1;
@@ -8813,6 +8924,11 @@ static int point_in_any_window(int mx, int my)
     }
     /* Toolbox */
     if (game.win_toolbar &&
+#ifndef __vita__
+        1 &&
+#else
+        0 &&
+#endif
         mx >= game.tool_x && mx < game.tool_x + TOOL_WIN_W &&
         my >= game.tool_y && my < game.tool_y + TOOL_WIN_H) {
         return 1;
@@ -8842,7 +8958,7 @@ static int point_in_any_window(int mx, int my)
         int wx, wy;
         tune_window_origin(&wx, &wy);
         if (mx >= wx && mx < wx + TUNE_W &&
-            my >= wy && my < wy + WIN_TITLEBAR_H + 26 + TUNE_ROWS * TUNE_ROW_H + 30)
+            my >= wy && my < wy + WIN_TITLEBAR_H + 26 + tune_visible_rows() * TUNE_ROW_H + 30)
             return 1;
     }
     return 0;
@@ -9320,10 +9436,43 @@ static void cap_drag_track(void)
         play_snd(SND_DELETE);
 }
 
+#ifdef __vita__
+static int vita_cancel_surface(void)
+{
+    if(save_dialog_mode) { save_dialog_mode=0;return 1; }
+    if(game.quit_confirm) { game.quit_confirm=0;game.sim.speed=game.quit_saved_speed;return 1; }
+    if(game.route_confirm) { route_confirm_close();return 1; }
+    if(game.notice_modal) { notice_close();return 1; }
+    if(game.disaster_modal) { disaster_do_proceed();return 1; } /* existing free/Cancel path; never pays */
+    if(game.name_edit_open) { close_name_editor();return 1; }
+    if(game.movie_dlg_open) { game.movie_dlg_open=0;return 1; }
+    if(game.find_open) { game.find_open=0;return 1; }
+    if(game.menu_open>=0) { game.menu_open=-1;game.menu_hover=-1;return 1; }
+    if(game.tool_popup>=0) { game.tool_popup=-1;return 1; }
+    if(game.elv_mode_pop) { game.elv_mode_pop=0;return 1; }
+    if(game.elv_edit_mode) { elv_edit_exit();return 1; }
+    if(game.person_open) { game.person_open=0;game.person_pid=0;return 1; }
+    if(game.rent_dd_open) { game.rent_dd_open=0;return 1; }
+    if(game.inspect_open) { game.inspect_open=0;return 1; }
+    if(game.fin_open) { game.fin_open=0;return 1; }
+    if(game.elv_open) { game.elv_open=0;return 1; }
+    if(game.show_masspricing) { game.show_masspricing=0;return 1; }
+    if(game.show_tuning) { game.show_tuning=0;return 1; }
+    if(game.show_stats) { game.show_stats=0;return 1; }
+    return 0;
+}
+#endif
+
 /* ---------- Input handling ---------- */
+#ifdef __vita__
+#include "vita_ui.inc"
+static void handle_event_native(SDL_Event *ev)
+#else
 static void handle_event(SDL_Event *ev)
+#endif
 {
 #ifdef __vita__
+    clamp_vita_panels();
     /* Synthesized pointer events already use the fixed renderer logical space.
      * Keep hover/build state coherent even when an early modal consumes them. */
     if (ev->type == SDL_MOUSEMOTION) { game.mouse_x=ev->motion.x; game.mouse_y=ev->motion.y; }
@@ -9696,7 +9845,9 @@ static void handle_event(SDL_Event *ev)
                 if (nx < 0) nx = 0;
                 if (nx + TOOL_WIN_W > game.screen_w) nx = game.screen_w - TOOL_WIN_W;
                 if (ny < 0) ny = 0;
-                if (ny + TOOL_WIN_H > game.screen_h) ny = game.screen_h - TOOL_WIN_H;
+#ifndef __vita__
+                if (ny + tool_win_height() > game.screen_h) ny = game.screen_h - tool_win_height();
+#endif
                 game.tool_x = nx;
                 game.tool_y = ny;
                 break;
@@ -10009,6 +10160,10 @@ static void handle_event(SDL_Event *ev)
             }
             /* Click-and-hold pull-down: releasing over a sub-item selects it. */
             if (game.tool_popup >= 0 && game.tool_popup < TOOL_BTN_COUNT) {
+                int release_x=ev->button.x,release_y=ev->button.y;
+#ifdef __vita__
+                CT_UIPanelPoint(tool_panel(),&release_x,&release_y);
+#endif
                 int nvis = tool_sub_visible_count(game.tool_popup);
                 const ToolButton *g = &tool_buttons[game.tool_popup];
                 for (int vj = 0; vj < nvis; vj++) {
@@ -10016,8 +10171,8 @@ static void handle_event(SDL_Event *ev)
                     if (j < 0) continue;
                     int bx, by;
                     tool_sub_rect(game.tool_popup, vj, &bx, &by);
-                    if (ev->button.x >= bx && ev->button.x < bx + TOOL_BTN_SIZE &&
-                        ev->button.y >= by && ev->button.y < by + TOOL_BTN_SIZE) {
+                    if (release_x >= bx && release_x < bx + TOOL_BTN_SIZE &&
+                        release_y >= by && release_y < by + TOOL_BTN_SIZE) {
                         game.build_type = g->sub[j];
                         game.tool_popup = -1;
                         break;
@@ -11186,6 +11341,9 @@ int main(int argc, char *argv[])
     
     CT_BOOT("Composite/UI texture preparation done");
 #ifdef __vita__
+    vita_load_cursors(game.renderer,&game.exe);
+#endif
+#ifdef __vita__
     vita_boot_watch_stage("tower and simulation initialization");
 #endif
     /* Initialize tower and simulation */
@@ -11209,6 +11367,11 @@ int main(int argc, char *argv[])
     game.tool_y = MENU_BAR_H + MAP_WIN_H;  /* Below minimap */
     game.info_x = game.screen_w - INFO_BAR_W;
     game.info_y = MENU_BAR_H;          /* Top right, under the bar */
+#ifdef __vita__
+    game.tool_x=MAP_WIN_W+12;game.tool_y=MENU_BAR_H+8;
+    game.info_x=game.screen_w-(int)lroundf(INFO_BAR_W*1.1f);
+    CT_BOOT("UI v0.9 Tools=1.25 Tower Info=1.10 Map/menu/dialogs=1.00; cached GPU panels, nearest");
+#endif
     game.win_dragging = 0;
     game.tool_popup = -1;
     game.demolish_mode = 0;
@@ -11527,12 +11690,14 @@ int main(int argc, char *argv[])
         SDL_Event ev;
         while (SDL_PollEvent(&ev)) {
 #ifdef __vita__
+            vita_ui_navigation(vita_ui_collect()?1:game.build_type!=ITEM_NONE?2:0);
             vita_input_event(&ev,handle_event);
 #else
             handle_event(&ev);
 #endif
         }
 #ifdef __vita__
+        vita_ui_navigation(vita_ui_collect()?1:game.build_type!=ITEM_NONE?2:0);
         if(vita_update_input(frame_dt,&game.cam_fx,&game.cam_fy,handle_event)) game.cam_anim=0;
         clamp_camera();
         screen_to_grid(game.mouse_x,game.mouse_y,&game.mouse_floor,&game.mouse_cell);

@@ -416,3 +416,36 @@ menu title, no proprietary EXE/resource files or shader compiler in package.
   reproduced byte-for-byte with the unchanged v0.7 game.c; no new failures.
 - Release filename: `ConciliaTower-v0.8.vpk`; PNGs remain 8-bit indexed. Hardware
   confirmation is still needed for zoom sampling/picking, new buttons and saves.
+
+
+## v0.9: readable compact UI, contextual controls and native cursors (APP_VER 00.09)
+
+Only Tools (1.25x, 32px item buttons become 40px) and Tower Info (1.1x,
+including text/stars/date/funds) grow. Map, menu bar and other dialogs stay
+native size. Tools starts beside Map, Info is right-aligned; drag bounds and
+side flyouts stay on-screen. Both enlarged panels share a reusable GPU canvas,
+with a single nearest-filtered upscale per panel and no per-frame CPU uploads.
+The tuning list is paged on Vita so its final controls remain reachable.
+
+Controls (supersede earlier release tables):
+- Left stick camera; right stick visible pointer; L right click; front touch tap/drag.
+- Outside menus/dialogs: Cross/R left click/drag; Circle Hand; Triangle Inspect;
+  Square Bulldozer; Start opens/toggles the game menu.
+- In menus/dialogs: D-pad moves a visible yellow/blue focus; Cross or Circle
+  activates the focused/default control; Triangle cancels/closes without
+  confirming (or choose a Cancel button). R/touch still click at the pointer.
+- With a build item selected, D-pad moves exactly one horizontal cell or one
+  floor per press, with hold-repeat and camera-edge scrolling. UI focus takes
+  priority. Hand/Inspect/no-build mode keeps fine pointer nudges.
+
+Runtime cursor extraction uses the original RT_GROUP_CURSOR/RT_CURSOR pairs:
+1002 crosshair for building, 1003 magnifier, 1004 hand, 1005 demolition X.
+Monochrome AND/XOR masks, bottom-up row strides and native hotspots are decoded;
+inversion is used when the renderer supports it, otherwise the standard arrow
+is the fallback. No original cursor assets are packaged. The fallback arrow now
+has a correctly outlined diagonal stem instead of the old detached rectangle.
+All cursors remain 1x and are drawn after the UI/focus highlight.
+
+The linker reserves an explicit 16 KiB gap for VitaSDK import/module metadata;
+plain 4 KiB segment alignment could make vita-elf-create fail as code grows.
+Build/package validated; Tyler will confirm v0.9 on hardware. No release/push.

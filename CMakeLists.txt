@@ -17,7 +17,7 @@ find_package(Freetype REQUIRED)
 
 set(VITA_APP_NAME "Concilia Tower")
 set(VITA_TITLEID  "CTWR00001")
-set(VITA_VERSION  "00.08")
+set(VITA_VERSION  "00.09")
 
 execute_process(
   COMMAND git describe --always --dirty
@@ -41,6 +41,9 @@ add_executable(${PROJECT_NAME}
   src/text_cache.c
   src/vita_input.c
   src/world_view.c
+  src/ui_scale.c
+  src/ui_focus.c
+  src/cursor.c
   src/save_store.c
   src/tower.c
   src/game.c
@@ -69,7 +72,8 @@ target_compile_definitions(${PROJECT_NAME} PRIVATE
 )
 
 target_link_options(${PROJECT_NAME} PRIVATE
-  -Wl,--wrap=vglInitExtended -Wl,--wrap=vglGetProcAddress)
+  -Wl,--wrap=vglInitExtended -Wl,--wrap=vglGetProcAddress
+  "-Wl,-T,${CMAKE_CURRENT_SOURCE_DIR}/vita/metadata-gap.ld")
 
 set_target_properties(${PROJECT_NAME} PROPERTIES LINKER_LANGUAGE CXX)
 

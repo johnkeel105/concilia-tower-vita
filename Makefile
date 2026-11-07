@@ -3,7 +3,7 @@ CT_VERSION := $(shell git describe --always --dirty 2>/dev/null || echo unknown)
 CFLAGS = -Wall -Wextra -std=c11 -O2 -DCT_BUILD_VERSION='"$(CT_VERSION)"' $(shell pkg-config --cflags sdl2 SDL2_ttf)
 LDFLAGS = $(shell pkg-config --libs sdl2 SDL2_ttf) -lm
 
-SRC = src/main.c src/exe_prepare.c src/ne_resource.c src/sprites.c src/texture.c src/text_cache.c src/vita_input.c src/world_view.c src/save_store.c src/tower.c src/game.c src/people.c src/twr.c src/audio.c src/sound_hook.c src/strings.c src/kwaj_expand.c
+SRC = src/main.c src/exe_prepare.c src/ne_resource.c src/sprites.c src/texture.c src/text_cache.c src/vita_input.c src/world_view.c src/ui_scale.c src/ui_focus.c src/cursor.c src/save_store.c src/tower.c src/game.c src/people.c src/twr.c src/audio.c src/sound_hook.c src/strings.c src/kwaj_expand.c
 # vendored libmspack subset (LGPL) — expands SIMTOWER.EX_ (KWAJ method 3)
 VENDOR = src/vendor/mspack/kwajd.c src/vendor/mspack/mszipd.c src/vendor/mspack/lzssd.c src/vendor/mspack/system.c
 SRC += $(VENDOR)

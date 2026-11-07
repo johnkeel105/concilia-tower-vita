@@ -11,4 +11,5 @@ void CT_ViewWorldPoint(const CT_WorldView *,int,int,int,int,int *,int *);
 void CT_ViewScreenPoint(const CT_WorldView *,int,int,int,int,int *,int *);
 float CT_ViewHalfWidth(const CT_WorldView *);
 float CT_ViewHalfHeight(const CT_WorldView *);
+void CT_ViewSnapStep(const CT_WorldView *,int,int,int,int,int,int,int,int *,int *);
 #endif
