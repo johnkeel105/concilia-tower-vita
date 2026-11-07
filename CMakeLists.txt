@@ -17,7 +17,7 @@ find_package(Freetype REQUIRED)
 
 set(VITA_APP_NAME "ConciliaTower")
 set(VITA_TITLEID  "CTWR00001")
-set(VITA_VERSION  "01.00")
+set(VITA_VERSION  "00.03")
 
 execute_process(
   COMMAND git describe --always --dirty
@@ -30,10 +30,11 @@ if(NOT CT_VERSION)
   set(CT_VERSION "unknown")
 endif()
 
-set(CMAKE_C_FLAGS "${CMAKE_C_FLAGS} -std=gnu11 -O2 -Wall -Wno-unused-parameter")
+set(CMAKE_C_FLAGS "${CMAKE_C_FLAGS} -std=gnu11 -O2 -Wall -Wno-unused-parameter -fstack-usage")
 
 add_executable(${PROJECT_NAME}
   src/main.c
+  src/exe_prepare.c
   src/ne_resource.c
   src/sprites.c
   src/tower.c
@@ -48,17 +49,22 @@ add_executable(${PROJECT_NAME}
   src/vendor/mspack/mszipd.c
   src/vendor/mspack/lzssd.c
   src/vendor/mspack/system.c
+  "$ENV{VITASDK}/share/gcc-arm-vita-eabi/samples/common/debugScreen.c"
   src/vita_platform.c
 )
 
 target_include_directories(${PROJECT_NAME} PRIVATE
   src
   src/vendor/mspack
+  "$ENV{VITASDK}/share/gcc-arm-vita-eabi/samples/common"
 )
 
 target_compile_definitions(${PROJECT_NAME} PRIVATE
   CT_BUILD_VERSION="${CT_VERSION}"
 )
+
+target_link_options(${PROJECT_NAME} PRIVATE
+  -Wl,--wrap=vglInitExtended -Wl,--wrap=vglGetProcAddress)
 
 set_target_properties(${PROJECT_NAME} PROPERTIES LINKER_LANGUAGE CXX)
 

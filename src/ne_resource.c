@@ -3,6 +3,15 @@
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
+#include <limits.h>
+#ifdef __vita__
+#include "vita_platform.h"
+#define NE_ERROR(...) do { vita_boot_log(__VA_ARGS__); fprintf(stderr, __VA_ARGS__); } while (0)
+#define NE_TRACE(...) vita_boot_log(__VA_ARGS__)
+#else
+#define NE_ERROR(...) fprintf(stderr, __VA_ARGS__)
+#define NE_TRACE(...) ((void)0)
+#endif
 
 static void list_init(NEResourceList *list)
 {
@@ -14,8 +23,11 @@ static void list_init(NEResourceList *list)
 static NEResource *list_add(NEResourceList *list)
 {
     if (list->count >= list->capacity) {
-        list->capacity = list->capacity ? list->capacity * 2 : 16;
-        list->items = realloc(list->items, sizeof(NEResource) * list->capacity);
+        int capacity = list->capacity ? list->capacity * 2 : 16;
+        NEResource *items = realloc(list->items, sizeof(NEResource) * capacity);
+        if (!items) return NULL;
+        list->items = items;
+        list->capacity = capacity;
     }
     NEResource *r = &list->items[list->count++];
     memset(r, 0, sizeof(*r));
@@ -31,9 +43,14 @@ static NEResourceList *table_get_type(NEResourceTable *table, uint16_t type)
     }
     /* Add new */
     if (table->type_count >= table->type_capacity) {
-        table->type_capacity = table->type_capacity ? table->type_capacity * 2 : 16;
-        table->types = realloc(table->types, sizeof(NEResourceList) * table->type_capacity);
-        table->type_ids = realloc(table->type_ids, sizeof(uint16_t) * table->type_capacity);
+        int capacity = table->type_capacity ? table->type_capacity * 2 : 16;
+        NEResourceList *types = realloc(table->types, sizeof(NEResourceList) * capacity);
+        if (!types) return NULL;
+        table->types = types;
+        uint16_t *ids = realloc(table->type_ids, sizeof(uint16_t) * capacity);
+        if (!ids) return NULL;
+        table->type_ids = ids;
+        table->type_capacity = capacity;
     }
     int idx = table->type_count++;
     table->type_ids[idx] = type;
@@ -47,32 +64,34 @@ int ne_load(NEResourceTable *table, const char *path)
 
     FILE *f = fopen(path, "rb");
     if (!f) {
-        fprintf(stderr, "ne_load: cannot open %s\n", path);
+        NE_ERROR("ne_load: cannot open %s\n", path);
         return -1;
     }
 
-    fseek(f, 0, SEEK_END);
+    if (fseek(f, 0, SEEK_END) != 0) goto fail;
     long file_size = ftell(f);
+    if (file_size < 64) goto fail;
+    NE_TRACE("ne_load: %s size=%ld", path, file_size);
 
     /* MZ magic, then offset to the second-stage header */
     uint16_t mz;
     fseek(f, 0, SEEK_SET);
     if (fread(&mz, 2, 1, f) != 1 || mz != 0x5A4D) {
-        fprintf(stderr, "ne_load: %s is not a Windows executable (no MZ header)\n", path);
+        NE_ERROR("ne_load: %s is not a Windows executable (no MZ header)\n", path);
         fclose(f);
         return -1;
     }
     uint32_t off_ne;
     fseek(f, 0x3C, SEEK_SET);
     if (fread(&off_ne, 4, 1, f) != 1) goto fail;
-    if ((long)off_ne + 0x40 > file_size) goto fail;
+    if ((uint64_t)off_ne + 0x40 > (uint64_t)file_size) goto fail;
 
     /* NE magic — a PE here means a 32-bit program (installer, wrong file) */
     uint16_t ne_magic;
     fseek(f, off_ne, SEEK_SET);
     if (fread(&ne_magic, 2, 1, f) != 1) goto fail;
     if (ne_magic != 0x454E) {
-        fprintf(stderr, "ne_load: %s is not a 16-bit NE executable (magic 0x%04x%s)\n",
+        NE_ERROR("ne_load: %s is not a 16-bit NE executable (magic 0x%04x%s)\n",
                 path, ne_magic, ne_magic == 0x4550 ? " = PE/32-bit" : "");
         fclose(f);
         return -1;
@@ -82,10 +101,15 @@ int ne_load(NEResourceTable *table, const char *path)
     uint16_t off_rt, lsa;
     fseek(f, off_ne + 0x24, SEEK_SET);
     if (fread(&off_rt, 2, 1, f) != 1) goto fail;
-    fseek(f, off_ne + 0x32, SEEK_SET);
+    /* NE resource offsets use the shift stored AT the resource table,
+     * not the unrelated segment alignment word at NE+0x32. */
+    if ((uint64_t)off_ne + off_rt + 2 > (uint64_t)file_size) goto fail;
+    fseek(f, off_ne + off_rt, SEEK_SET);
     if (fread(&lsa, 2, 1, f) != 1) goto fail;
+    NE_TRACE("ne_load: NE offset=%lu resource table=%u resource alignment=%u",
+             (unsigned long)off_ne, off_rt, lsa);
     if (off_rt == 0 || lsa > 16) {
-        fprintf(stderr, "ne_load: %s has no resource table\n", path);
+        NE_ERROR("ne_load: %s has no resource table\n", path);
         fclose(f);
         return -1;
     }
@@ -96,9 +120,10 @@ int ne_load(NEResourceTable *table, const char *path)
     for (;;) {
         uint16_t type, count;
         if (fread(&type, 2, 1, f) != 1) goto fail;
+        if (type == 0) break;
         if (fread(&count, 2, 1, f) != 1) goto fail;
+        if ((uint64_t)ftell(f) + 4 + (uint64_t)count * 12 > (uint64_t)file_size) goto fail;
 
-        if (type == 0) break; /* End of resource table */
 
         /* Some SimTower pressings identify the custom resource types by
          * NAME (a string offset — high bit clear) instead of ordinal IDs
@@ -128,7 +153,9 @@ int ne_load(NEResourceTable *table, const char *path)
             type = mapped;
         }
 
+        NE_TRACE("ne_load: resource type=0x%04x count=%u", type, count);
         NEResourceList *list = table_get_type(table, type);
+        if (!list) goto oom;
         
         /* Skip 4 reserved bytes */
         fseek(f, 4, SEEK_CUR);
@@ -138,8 +165,8 @@ int ne_load(NEResourceTable *table, const char *path)
             if (fread(&offset_aligned, 2, 1, f) != 1) goto fail;
             if (fread(&length_aligned, 2, 1, f) != 1) goto fail;
             
-            int offset = (int)offset_aligned << lsa;
-            int length = (int)length_aligned << lsa;
+            uint32_t offset = (uint32_t)offset_aligned << lsa;
+            uint32_t length = (uint32_t)length_aligned << lsa;
 
             /* Skip 2 bytes (flags) */
             fseek(f, 2, SEEK_CUR);
@@ -150,23 +177,27 @@ int ne_load(NEResourceTable *table, const char *path)
             /* Skip 4 reserved bytes */
             fseek(f, 4, SEEK_CUR);
 
-            if (offset < 0 || length < 0 || (long)offset + length > file_size) {
-                fprintf(stderr, "ne_load: resource type=0x%x id=0x%x runs past EOF "
+            if (offset > INT_MAX || length > INT_MAX ||
+                (uint64_t)offset + length > (uint64_t)file_size) {
+                NE_ERROR("ne_load: resource type=0x%x id=0x%x runs past EOF "
                         "(corrupt or truncated file)\n", type, id);
                 goto fail;
             }
             NEResource *r = list_add(list);
+            if (!r) goto oom;
             r->type = type;
             r->id = id;
             r->offset = offset;
             r->length = length;
-            r->data = malloc(length);
+            r->data = malloc(length ? length : 1);
+            if (!r->data) goto oom;
             
             /* Read resource data */
             long backup = ftell(f);
             fseek(f, offset, SEEK_SET);
-            if ((int)fread(r->data, 1, length, f) != length) {
-                fprintf(stderr, "ne_load: short read for resource type=0x%x id=0x%x\n", type, id);
+            if (fread(r->data, 1, length, f) != length) {
+                NE_ERROR("ne_load: short read for resource type=0x%x id=0x%x\n", type, id);
+                goto fail;
             }
             fseek(f, backup, SEEK_SET);
         }
@@ -175,8 +206,12 @@ int ne_load(NEResourceTable *table, const char *path)
     fclose(f);
     return 0;
 
+oom:
+    NE_ERROR("ne_load: allocation failed in %s\n", path);
+    goto cleanup;
 fail:
-    fprintf(stderr, "ne_load: unexpected EOF in %s\n", path);
+    NE_ERROR("ne_load: invalid/truncated resource table in %s\n", path);
+cleanup:
     fclose(f);
     ne_free(table);
     return -1;

@@ -73,3 +73,70 @@ already have it.
 Same rule as the desktop/web builds: supply your own `SIMTOWER.EXE`.
 SimTower is © its rights holders. This project is not affiliated with Maxis,
 OpenBook, or Vivarium.
+
+
+## v0.3 boot diagnostics (APP_VER 00.03)
+
+This build recognizes KWAJ-compressed media **even when renamed SIMTOWER.EXE**.
+It displays decompression progress using a direct framebuffer (no shaders/TTF),
+writes a temporary expanded file, validates its MZ/NE headers, and only then
+installs `ux0:data/concilia-tower/SIMTOWER.EXE`. An existing compressed destination
+is preserved as `SIMTOWER.EXE.kwaj.bak` (or a numbered backup if that exists).
+Allow at least 10 MB of free space. Do not power off during expansion.
+Uncompressed valid EXEs are left untouched.
+
+Startup diagnostics: `ux0:data/concilia-tower/boot.log` (every record flushed,
+closed and synced). The previous launch is retained in `boot.previous.log`.
+The log includes file probes/sizes, MZ/NE validation, resource types, clocks,
+font loading, SDL/window/context setup, vitaGL's boolean init result, SDL shader
+compilation/link results and the first gameplay frame. Presence of the shader
+module alone does not prove it can be loaded. Build version is logged as v0.3.
+
+Recoverable startup errors stop at a direct-framebuffer text screen and wait
+for START or Circle (release buttons first); they no longer silently return from
+main. Send the entire `boot.log`, plus a photo of any message. If the system
+still terminates the process, the last completed log record narrows the failing
+stage. This is not a CPU exception handler: arbitrary native crashes cannot be
+recovered safely, and a last record does not prove the following step completed.
+If no log appears, report that as well (the process may have failed before main
+or the data directory could not be written).
+
+The SDK's `share/gcc-arm-vita-eabi/samples/common/debugScreen.c` and bitmap font
+are compiled for the error/progress display. No proprietary shader library,
+SimTower executable, decompressed resources or emulator data goes into the VPK.
+LiveArea images remain 8-bit indexed PNG.
+
+### Findings / validation
+
+* Misnamed KWAJ EXE explains the old immediate exit: NE parser rejects its missing
+  MZ header and main used to return 1, before SDL was initialized.
+* Installed SDL vitaGL backend ignores `vglInitExtended`'s boolean return. A
+  link-time interposer now checks/logs it: GL_TRUE is success, not failure.
+* SDL GLES2 renderer/context is explicitly requested; unsupported renderer or
+  texture upload failures stop visibly instead of proceeding with null objects.
+* CPU heap is explicitly 192 MiB (SDK default was 128 MiB). This is headroom,
+  **not** a confirmed cause. vitaGL retains separate pools; parameters are logged.
+* Parser now uses the resource table's alignment word (not segment alignment),
+  checks allocations and unsigned bounds, and rejects short reads. DIB reads
+  avoid ARM unaligned casts and check pixel bounds. Texture readback failures no
+  longer return uninitialized pixels.
+* `-fstack-usage` measured startup main at under 1 KiB; largest game C frame was
+  the audio mixer at about 16 KiB. Static BSS is about 5 MiB. No evidence justified
+  a speculative main-thread stack change or 64-bit compatibility rewrite.
+
+Host-only parser smoke harness (no SDL development packages required):
+
+```sh
+gcc -std=gnu11 -g -O1 -fsanitize=address,undefined -Isrc -Isrc/vendor/mspack \
+  tests/test_exe_boot.c src/exe_prepare.c src/ne_resource.c src/kwaj_expand.c \
+  src/vendor/mspack/{kwajd,mszipd,lzssd,system}.c -o /tmp/ct-exe-boot-test
+/tmp/ct-exe-boot-test /path/to/your/EXE /tmp/expanded.exe
+```
+
+Tested on the host: supplied expanded SimTower and supplied misnamed KWAJ both
+parse into 20 resource types / 499 resources; expanded bytes match SHA-256
+`2825a3c53f77945c63b6d72e26faa7dde5ddd56c31ca668e67a12576d7feca96`.
+Original backup/relaunch behavior, malformed input, truncated KWAJ and mismatched
+NE segment/resource alignment were also tested with ASan/UBSan. Native Vita
+rendering/controls still require hardware testing; this does not claim a verified
+Vita3K boot.

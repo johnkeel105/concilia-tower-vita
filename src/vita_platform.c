@@ -5,6 +5,17 @@
 #include <stdlib.h>
 #include <string.h>
 #include <math.h>
+#include <stdarg.h>
+#include <errno.h>
+#include <stdint.h>
+#include <psp2/ctrl.h>
+#include <psp2/kernel/threadmgr.h>
+#include <psp2/kernel/sysmem.h>
+#include <psp2/kernel/processmgr.h>
+#include <psp2/io/fcntl.h>
+#include <vitaGL.h>
+#include "debugScreen.h"
+#include "exe_prepare.h"
 
 #include <SDL_ttf.h>
 #include <psp2/io/stat.h>
@@ -14,18 +25,70 @@
 
 extern int ct_kwaj_expand(const char *in_path, const char *out_path);
 
+/* Reserve CPU heap explicitly; leave RAM/CDRAM for vitaGL's separate pools.
+ * The SDK default was 128 MiB, not the desktop's virtually unlimited heap. */
+unsigned int _newlib_heap_size_user = 192 * 1024 * 1024;
+static char search_report[4096];
+static int log_writable;
+static int debug_screen_active;
+
+void vita_boot_log(const char *fmt, ...)
+{
+    /* A closed file after EVERY record survives later aborts/graphics faults.
+     * Never use SDL logging here (it can recurse through our callback). */
+    FILE *f = fopen(CT_DATA_DIR "/boot.log", "a");
+    if (!f) { log_writable = 0; return; }
+    log_writable = 1;
+    fprintf(f, "[%llu us] ", (unsigned long long)sceKernelGetProcessTimeWide());
+    va_list ap;
+    va_start(ap, fmt);
+    vfprintf(f, fmt, ap);
+    va_end(ap);
+    int wrote = fputc('\n', f) != EOF;
+    int flushed = fflush(f) == 0;
+    int closed = fclose(f) == 0;
+    log_writable = wrote && flushed && closed;
+    sceIoSync("ux0:", 0);
+}
+
+static void sdl_log_output(void *unused, int category, SDL_LogPriority priority,
+                           const char *message)
+{
+    vita_boot_log("SDL[%d/%d]: %s", category, priority, message);
+}
+
+void vita_boot_begin(void)
+{
+    int data_rc = sceIoMkdir("ux0:data", 0777);
+    int dir_rc = sceIoMkdir(CT_DATA_DIR, 0777);
+    /* Keep last run available even if the new run fails very early. */
+    sceIoRemove(CT_DATA_DIR "/boot.previous.log");
+    sceIoRename(CT_DATA_DIR "/boot.log", CT_DATA_DIR "/boot.previous.log");
+    vita_boot_log("ConciliaTower v0.3 APP_VER=00.03 build=%s: app start", CT_BUILD_VERSION);
+    vita_boot_log("kernel process clock available; mkdir ux0:data=0x%08x data dir=0x%08x; log writable=%d",
+                  data_rc, dir_rc, log_writable);
+    vita_boot_log("newlib heap=%u MiB; startup diagnostics use no SDL/GL", _newlib_heap_size_user >> 20);
+    if (!log_writable) vita_boot_fatal("Cannot write boot.log. Check ux0:data/concilia-tower/ free space/write access.");
+    SDL_LogSetOutputFunction(sdl_log_output, NULL);
+    SDL_LogSetAllPriority(SDL_LOG_PRIORITY_INFO);
+    vita_boot_log("shader-library preflight follows (presence is not proof the module can load)");
+    vita_shader_library_present();
+}
+
 void vita_boost_clocks(void)
 {
-    scePowerSetArmClockFrequency(444);
-    scePowerSetBusClockFrequency(222);
-    scePowerSetGpuClockFrequency(222);
-    scePowerSetGpuXbarClockFrequency(166);
+    vita_boot_log("clock setup begin");
+    int arm = scePowerSetArmClockFrequency(444);
+    int bus = scePowerSetBusClockFrequency(222);
+    int gpu = scePowerSetGpuClockFrequency(222);
+    int xbar = scePowerSetGpuXbarClockFrequency(166);
+    vita_boot_log("clock setup done: arm=%d bus=%d gpu=%d xbar=%d", arm, bus, gpu, xbar);
 }
 
 void vita_prepare_userdata(void)
 {
-    sceIoMkdir("ux0:data", 0777);
-    sceIoMkdir(CT_DATA_DIR, 0777);
+    int rc = sceIoMkdir(CT_DATA_DIR, 0777);
+    vita_boot_log("data dir recheck: 0x%08x (already exists is normal)", rc);
 }
 
 const char *vita_save_path(void)
@@ -33,32 +96,57 @@ const char *vita_save_path(void)
     return CT_DATA_DIR "/concilliatower.sav";
 }
 
+int vita_probe_file(const char *path)
+{
+    SceIoStat st;
+    memset(&st, 0, sizeof(st));
+    int rc = sceIoGetstat(path, &st);
+    char line[256];
+    snprintf(line, sizeof(line), "%s: %s size=%llu (stat=0x%08x)", path,
+             rc >= 0 ? "FOUND" : "missing", (unsigned long long)st.st_size, rc);
+    vita_boot_log("%s", line);
+    if (strstr(path, "SIMTOWER") || strstr(path, "simtower") || strstr(path, "SimTower")) {
+        size_t n = strlen(search_report);
+        snprintf(search_report + n, sizeof(search_report) - n, "%s\n", line);
+    }
+    if (rc < 0 || st.st_size == 0) return 0;
+    FILE *f = fopen(path, "rb");
+    if (!f) { vita_boot_log("file unreadable: %s errno=%d", path, errno); return 0; }
+    fclose(f);
+    return 1;
+}
+
+int vita_shader_library_present(void)
+{
+    int a = vita_probe_file("ur0:data/libshacccg.suprx");
+    int b = vita_probe_file("ur0:data/external/libshacccg.suprx");
+    return a || b;
+}
+
 void vita_try_expand_ex_(void)
 {
-    char dest[160];
-    snprintf(dest, sizeof dest, "%s/SIMTOWER.EXE", CT_DATA_DIR);
-    FILE *have = fopen(dest, "rb");
-    if (have) {
-        fclose(have);
-        return;
-    }
-
-    static const char *cands[] = {
-        CT_DATA_DIR "/SIMTOWER.EX_",
-        CT_DATA_DIR "/simtower.ex_",
-        "ux0:data/SIMTOWER.EX_",
-        "ux0:data/simtower.ex_",
-        NULL
+    const char *dest = CT_DATA_DIR "/SIMTOWER.EXE";
+    static const char *plain[] = {
+        CT_DATA_DIR "/SIMTOWER.EXE", CT_DATA_DIR "/simtower.exe",
+        CT_DATA_DIR "/SimTower.exe", "ux0:data/SIMTOWER.EXE",
+        "ux0:data/simtower.exe", "ux0:data/SimTower.exe", NULL
     };
-    for (int i = 0; cands[i]; i++) {
-        FILE *t = fopen(cands[i], "rb");
-        if (!t)
-            continue;
-        fclose(t);
-        fprintf(stderr, "Expanding %s -> %s\n", cands[i], dest);
-        ct_kwaj_expand(cands[i], dest);
-        return;
-    }
+    static const char *cands[] = {
+        CT_DATA_DIR "/SIMTOWER.EX_", CT_DATA_DIR "/simtower.ex_",
+        CT_DATA_DIR "/SimTower.ex_", "ux0:data/SIMTOWER.EX_",
+        "ux0:data/simtower.ex_", "ux0:data/SimTower.ex_", NULL
+    };
+    int have = 0;
+    const char *compressed = NULL;
+    for (int i = 0; plain[i]; i++) have |= vita_probe_file(plain[i]);
+    for (int i = 0; cands[i]; i++)
+        if (vita_probe_file(cands[i]) && !compressed) compressed = cands[i];
+    if (have || !compressed) return;
+    /* Same validation/temporary-file/backup path as a misnamed KWAJ .EXE. */
+    int rc = ct_prepare_exe(compressed, dest, vita_boot_notice);
+    vita_boot_log("compressed EX_ preparation result=%d", rc);
+    if (rc < 0) vita_boot_fatal("SIMTOWER.EX_ expansion failed; original preserved. See boot.log.");
+    sceIoSync("ux0:", 0);
 }
 
 void vita_init_runtime(void)
@@ -129,114 +217,111 @@ void vita_pan_camera(float *cam_fx, float *cam_fy)
     if (abs(ry) > dead) *cam_fy += (ry / 32768.0f) * 26.0f;
 }
 
-static TTF_Font *open_ui_font(int size)
+/* Fatal boot notice: direct display framebuffer + SDK bitmap font. No
+ * SDL window, TTF, vitaGL, shader compiler, or EXE resources are required.
+ * Do not SDL_Quit here: cleanup after half-initialized GL can itself crash. */
+void vita_boot_notice(const char *message)
 {
-    static const char *paths[] = {
-        "app0:fonts/LiberationSans-Regular.ttf",
-        "app0:/fonts/LiberationSans-Regular.ttf",
-        "app0:fonts/LiberationSans-Bold.ttf",
-        "app0:/fonts/LiberationSans-Bold.ttf",
-        NULL
-    };
-    for (int i = 0; paths[i]; i++) {
-        TTF_Font *f = TTF_OpenFont(paths[i], size);
-        if (f)
-            return f;
-    }
-    return NULL;
+    vita_boot_log("%s", message);
+    if (!debug_screen_active) debug_screen_active = psvDebugScreenInit() >= 0;
+    if (debug_screen_active)
+        psvDebugScreenPrintf("\e[2J\e[1;1HConciliaTower v0.3\n\n%s\n\nLog: ux0:data/concilia-tower/boot.log\n", message);
 }
 
-static void blit_text(SDL_Renderer *r, TTF_Font *font, const char *text,
-                      int x, int y, SDL_Color color)
+void vita_boot_notice_end(void)
 {
-    if (!font || !text || !text[0])
-        return;
-    SDL_Surface *s = TTF_RenderUTF8_Blended(font, text, color);
-    if (!s)
-        return;
-    SDL_Texture *t = SDL_CreateTextureFromSurface(r, s);
-    if (t) {
-        SDL_Rect d = { x, y, s->w, s->h };
-        SDL_RenderCopy(r, t, NULL, &d);
-        SDL_DestroyTexture(t);
+    if (debug_screen_active) psvDebugScreenFinish();
+    debug_screen_active = 0;
+}
+
+int vita_boot_fatal(const char *reason)
+{
+    char error[512];
+    snprintf(error, sizeof(error), "%s", SDL_GetError());
+    vita_boot_log("FATAL: %s; SDL_GetError=%s", reason, error);
+    int rc = debug_screen_active ? 0 : psvDebugScreenInit();
+    vita_boot_log("direct framebuffer error screen init=0x%08x", rc);
+    if (rc >= 0) {
+        psvDebugScreenPrintf("\e[2J\e[1;1HConciliaTower v0.3 - startup stopped\n\n%s\nSDL: %s\n\n", reason, error);
+        psvDebugScreenPrintf("Log: ux0:data/concilia-tower/boot.log\nLog writable: %s\n\n", log_writable ? "yes" : "NO - check free space/write access");
+        psvDebugScreenPrintf("EXE search (FOUND = detected, not yet validated):\n%s\n", search_report);
+        psvDebugScreenPrintf("\nSend boot.log and a photo of this screen.\nRelease buttons, then press START or Circle to exit.\n");
     }
-    SDL_FreeSurface(s);
+    SceCtrlData pad;
+    int released = 0;
+    for (;;) {
+        memset(&pad, 0, sizeof(pad));
+        if (sceCtrlPeekBufferPositive(0, &pad, 1) > 0) {
+            unsigned mask = SCE_CTRL_START | SCE_CTRL_CIRCLE;
+            if (!(pad.buttons & mask)) released = 1;
+            if (released && (pad.buttons & mask)) break;
+        }
+        sceKernelDelayThread(20000);
+    }
+    vita_boot_log("user acknowledged startup failure; exit requested");
+    sceKernelExitProcess(1);
+    return 1;
 }
 
 int vita_missing_exe_screen(void)
 {
-    if (SDL_Init(SDL_INIT_VIDEO | SDL_INIT_JOYSTICK | SDL_INIT_GAMECONTROLLER) != 0)
-        return 1;
-    vita_init_runtime();
-    TTF_Init();
+    return vita_boot_fatal("SIMTOWER.EXE missing/unreadable. Copy it (or SIMTOWER.EX_) to ux0:data/concilia-tower/.");
+}
 
-    SDL_Window *w = SDL_CreateWindow("ConciliaTower",
-        SDL_WINDOWPOS_CENTERED, SDL_WINDOWPOS_CENTERED,
-        960, 544, SDL_WINDOW_SHOWN | SDL_WINDOW_FULLSCREEN | SDL_WINDOW_OPENGL);
-    SDL_Renderer *r = NULL;
-    if (w)
-        r = SDL_CreateRenderer(w, -1, SDL_RENDERER_ACCELERATED | SDL_RENDERER_TARGETTEXTURE);
-    if (!r && w)
-        r = SDL_CreateRenderer(w, -1, SDL_RENDERER_SOFTWARE);
-    if (!w || !r) {
-        if (r) SDL_DestroyRenderer(r);
-        if (w) SDL_DestroyWindow(w);
-        TTF_Quit();
-        SDL_Quit();
-        return 1;
-    }
+static void log_free_memory(const char *stage)
+{
+    SceKernelFreeMemorySizeInfo mem = {0};
+    mem.size = sizeof(mem);
+    int rc = sceKernelGetFreeMemorySize(&mem);
+    vita_boot_log("memory %s: query=0x%08x user=%d CDRAM=%d phycont=%d bytes",
+                  stage, rc, mem.size_user, mem.size_cdram, mem.size_phycont);
+}
 
-    TTF_Font *title = open_ui_font(26);
-    TTF_Font *body = open_ui_font(18);
-    const char *lines[] = {
-        "SIMTOWER.EXE was not found.",
-        "Copy a legally obtained copy to:",
-        "",
-        "ux0:data/concilia-tower/SIMTOWER.EXE",
-        "",
-        "Original CD/floppy media may ship SIMTOWER.EX_",
-        "instead — drop that in the same folder and relaunch.",
-        "This homebrew does not include Maxis assets.",
-        "",
-        "Press START or Circle to exit."
-    };
+/* SDL's installed vitaGL backend ignores vglInitExtended's return value.
+ * Interpose the call so a real GL_FALSE does not continue into invalid GL.
+ * GL_TRUE is SUCCESS, unlike SDL's zero-success convention. */
+GLboolean __real_vglInitExtended(int, int, int, int, SceGxmMultisampleMode);
+GLboolean __wrap_vglInitExtended(int pool, int width, int height, int threshold,
+                                SceGxmMultisampleMode msaa)
+{
+    log_free_memory("before vitaGL");
+    vita_boot_log("vitaGL init begin: legacy=%d size=%dx%d RAM threshold=%d MSAA=%d", pool, width, height, threshold, msaa);
+    GLboolean ok = __real_vglInitExtended(pool, width, height, threshold, msaa);
+    vita_boot_log("vitaGL init returned %d (GL_TRUE=%d)", ok, GL_TRUE);
+    log_free_memory("after vitaGL");
+    if (ok == GL_FALSE) vita_boot_fatal("vitaGL initialization failed. Check memory and boot.log.");
+    return ok;
+}
 
-    int running = 1;
-    while (running) {
-        SDL_Event e;
-        while (SDL_PollEvent(&e)) {
-            if (e.type == SDL_QUIT)
-                running = 0;
-            else if (e.type == SDL_KEYDOWN &&
-                     (e.key.keysym.sym == SDLK_ESCAPE ||
-                      e.key.keysym.sym == SDLK_SPACE ||
-                      e.key.keysym.sym == SDLK_RETURN))
-                running = 0;
-            else if (e.type == SDL_CONTROLLERBUTTONDOWN &&
-                     (e.cbutton.button == SDL_CONTROLLER_BUTTON_START ||
-                      e.cbutton.button == SDL_CONTROLLER_BUTTON_B ||
-                      e.cbutton.button == SDL_CONTROLLER_BUTTON_A))
-                running = 0;
-        }
-        SDL_SetRenderDrawColor(r, 14, 22, 48, 255);
-        SDL_RenderClear(r);
-        SDL_Color gold = { 235, 205, 92, 255 };
-        SDL_Color cream = { 230, 228, 214, 255 };
-        blit_text(r, title ? title : body, "ConciliaTower for PS Vita", 80, 70, gold);
-        int y = 130;
-        for (size_t i = 0; i < sizeof(lines) / sizeof(lines[0]); i++) {
-            blit_text(r, body, lines[i], 80, y, cream);
-            y += 28;
-        }
-        SDL_RenderPresent(r);
-        SDL_Delay(16);
-    }
+/* SDL resolves GL entry points via vglGetProcAddress, not direct linkage. */
+static void diagnostic_compile_shader(GLuint shader)
+{
+    vita_boot_log("shader compile begin id=%u", shader);
+    glCompileShader(shader);
+    GLint ok = GL_FALSE;
+    char info[2048] = {0};
+    glGetShaderiv(shader, GL_COMPILE_STATUS, &ok);
+    glGetShaderInfoLog(shader, sizeof(info), NULL, info);
+    vita_boot_log("shader compile done id=%u status=%d info=%s", shader, ok, info);
+    if (!ok) vita_boot_fatal("Shader compilation failed. See boot.log compiler output.");
+}
 
-    if (title) TTF_CloseFont(title);
-    if (body) TTF_CloseFont(body);
-    SDL_DestroyRenderer(r);
-    SDL_DestroyWindow(w);
-    TTF_Quit();
-    SDL_Quit();
-    return 1;
+static void diagnostic_link_program(GLuint program)
+{
+    vita_boot_log("shader program link begin id=%u", program);
+    glLinkProgram(program);
+    GLint ok = GL_FALSE;
+    char info[2048] = {0};
+    glGetProgramiv(program, GL_LINK_STATUS, &ok);
+    glGetProgramInfoLog(program, sizeof(info), NULL, info);
+    vita_boot_log("shader program link done id=%u status=%d info=%s", program, ok, info);
+    if (!ok) vita_boot_fatal("Shader program link failed. See boot.log.");
+}
+
+void *__real_vglGetProcAddress(const char *name);
+void *__wrap_vglGetProcAddress(const char *name)
+{
+    if (!strcmp(name, "glCompileShader")) return (void *)diagnostic_compile_shader;
+    if (!strcmp(name, "glLinkProgram")) return (void *)diagnostic_link_program;
+    return __real_vglGetProcAddress(name);
 }

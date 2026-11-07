@@ -15,6 +15,7 @@
 #include <SDL.h>
 #include <SDL_ttf.h>
 #include "ne_resource.h"
+#include "exe_prepare.h"
 #include "sprites.h"
 #include "tower.h"
 #include "game.h"
@@ -28,6 +29,11 @@
 #ifdef __vita__
 #include <strings.h>
 #include "vita_platform.h"
+#define CT_BOOT(...) vita_boot_log(__VA_ARGS__)
+#define CT_FAIL(reason) vita_boot_fatal(reason)
+#else
+#define CT_BOOT(...) ((void)0)
+#define CT_FAIL(reason) 1
 #endif
 
 /* ---------- Window / display ---------- */
@@ -8318,7 +8324,17 @@ static void render(void)
     render_route_confirm();    /* likewise */
     render_quit_confirm();     /* topmost — quitting outranks all */
 
+#ifdef __vita__
+    static int first_frame = 1;
+    if (first_frame) CT_BOOT("first gameplay frame submit begin");
+#endif
     SDL_RenderPresent(game.renderer);
+#ifdef __vita__
+    if (first_frame) {
+        CT_BOOT("first gameplay frame presented; SDL=%s", SDL_GetError());
+        first_frame = 0;
+    }
+#endif
 }
 
 /* ---------- Build type cycling ---------- */
@@ -9879,7 +9895,9 @@ static void handle_event(SDL_Event *ev)
 /* ---------- Font initialization ---------- */
 static void init_fonts(void)
 {
+    CT_BOOT("TTF_Init begin");
     if (TTF_Init() != 0) {
+        CT_BOOT("TTF_Init failed: %s", TTF_GetError());
         fprintf(stderr, "TTF_Init failed: %s\n", TTF_GetError());
         return;
     }
@@ -9918,7 +9936,9 @@ static void init_fonts(void)
     };
 
     for (int i = 0; font_paths[i]; i++) {
+        CT_BOOT("TTF_OpenFont: %s", font_paths[i]);
         game.font = TTF_OpenFont(font_paths[i], 14);
+        CT_BOOT("TTF_OpenFont result=%p error=%s", (void*)game.font, TTF_GetError());
         if (game.font) {
             printf("Font loaded: %s\n", font_paths[i]);
             game.font_small = TTF_OpenFont(font_paths[i], 11);
@@ -10008,6 +10028,9 @@ int main(int argc, char *argv[])
     const char *screenshot_path = "/tmp/simtower_screenshot.bmp";
 
 #ifdef __vita__
+    vita_boot_begin();
+    CT_BOOT("main entered: sizeof(Game)=%u sizeof(long)=%u sizeof(void*)=%u",
+            (unsigned)sizeof(game), (unsigned)sizeof(long), (unsigned)sizeof(void*));
     vita_boost_clocks();
     vita_prepare_userdata();
     vita_try_expand_ex_();
@@ -10018,7 +10041,10 @@ int main(int argc, char *argv[])
 #ifdef __vita__
         "ux0:data/concilia-tower/SIMTOWER.EXE",
         "ux0:data/concilia-tower/simtower.exe",
+        "ux0:data/concilia-tower/SimTower.exe",
         "ux0:data/SIMTOWER.EXE",
+        "ux0:data/simtower.exe",
+        "ux0:data/SimTower.exe",
         "app0:SIMTOWER.EXE",
         "app0:/SIMTOWER.EXE",
 #endif
@@ -10061,8 +10087,13 @@ int main(int argc, char *argv[])
     
     if (!exe_path) {
         for (int i = 0; search_paths[i]; i++) {
+#ifdef __vita__
+            int found = vita_probe_file(search_paths[i]);
+            if (found && !exe_path) exe_path = search_paths[i];
+#else
             FILE *test = fopen(search_paths[i], "rb");
             if (test) { fclose(test); exe_path = search_paths[i]; break; }
+#endif
         }
     }
     
@@ -10086,11 +10117,20 @@ int main(int argc, char *argv[])
 #endif
     printf("Loading resources from: %s\n", exe_path);
 
+#ifdef __vita__
+    int prepared = ct_prepare_exe(exe_path, "ux0:data/concilia-tower/SIMTOWER.EXE", vita_boot_notice);
+    if (prepared < 0) return vita_boot_fatal("EXE detected but header check/expansion failed. See boot.log; original preserved.");
+    if (prepared > 0) exe_path = "ux0:data/concilia-tower/SIMTOWER.EXE";
+    vita_probe_file(exe_path);
+#endif
+    CT_BOOT("EXE detected: %s; NE asset parse begin", exe_path);
     /* Load NE resources */
     if (ne_load(&game.exe, exe_path) != 0) {
         fprintf(stderr, "Failed to load %s\n", exe_path);
-        return 1;
+        return CT_FAIL("SIMTOWER.EXE detected but NE resource parsing failed. See boot.log.");
     }
+
+    CT_BOOT("NE asset parse OK: %d resource types", game.exe.type_count);
 
     /* The Japanese original, The Tower for Windows (TOWER.EXE), carries 13
      * custom resource types — two extras prepended shift every ordinal by
@@ -10100,7 +10140,7 @@ int main(int argc, char *argv[])
         fprintf(stderr, "%s looks like the Japanese original, The Tower for "
                 "Windows — its resource layout differs and it isn't "
                 "supported (yet). SimTower's SIMTOWER.EXE is.\n", exe_path);
-        return 1;
+        return CT_FAIL("Unsupported Japanese TOWER.EXE resource layout.");
     }
 
     /* The game reads six resource types out of the EXE; a file that parses
@@ -10120,12 +10160,23 @@ int main(int argc, char *argv[])
                         "missing SimTower's %s (resource type 0x%04x) — "
                         "not a SimTower EXE we recognize.\n",
                         exe_path, need[i].what, need[i].type);
-                return 1;
+                CT_BOOT("Missing resource: %s type=0x%04x", need[i].what, need[i].type);
+                return CT_FAIL("EXE found but missing required SimTower resources (wrong EXE). See boot.log.");
             }
         }
     }
+    CT_BOOT("EXE resource validation OK; string tables parse begin");
     exe_strings_init(&game.exe);   /* 0x7f06 string tables + dialog texts */
     
+    CT_BOOT("string tables parse done");
+#ifdef __vita__
+    if (!vita_shader_library_present())
+        return vita_boot_fatal("Shader compiler library missing/unreadable in ur0:data/ or ur0:data/external/.");
+#endif
+#ifdef __vita__
+    vita_boot_notice_end();
+#endif
+    CT_BOOT("SDL_Init begin (video/audio/controller)");
     /* Initialize SDL */
 #ifdef __vita__
     if (SDL_Init(SDL_INIT_VIDEO | SDL_INIT_AUDIO |
@@ -10134,10 +10185,25 @@ int main(int argc, char *argv[])
     if (SDL_Init(SDL_INIT_VIDEO | SDL_INIT_AUDIO) != 0) {
 #endif
         fprintf(stderr, "SDL_Init failed: %s\n", SDL_GetError());
-        return 1;
+        return CT_FAIL("SDL_Init failed.");
     }
 #ifdef __vita__
+    CT_BOOT("SDL_Init done: video driver=%s", SDL_GetCurrentVideoDriver());
     vita_init_runtime();
+    /* Match SDL's GLES2 renderer: no desktop 3.x/core context request. */
+    for (int i = 0; i < SDL_GetNumRenderDrivers(); i++) {
+        SDL_RendererInfo info;
+        if (SDL_GetRenderDriverInfo(i, &info) == 0)
+            CT_BOOT("SDL render driver %d: %s flags=0x%x", i, info.name, (unsigned)info.flags);
+    }
+    SDL_SetHint(SDL_HINT_RENDER_DRIVER, "opengles2");
+    if (SDL_GL_SetAttribute(SDL_GL_CONTEXT_MAJOR_VERSION, 2) != 0 ||
+        SDL_GL_SetAttribute(SDL_GL_CONTEXT_MINOR_VERSION, 0) != 0 ||
+        SDL_GL_SetAttribute(SDL_GL_CONTEXT_PROFILE_MASK, SDL_GL_CONTEXT_PROFILE_ES) != 0)
+        return vita_boot_fatal("Could not request compatible GLES 2.0 context.");
+    SDL_GL_SetAttribute(SDL_GL_MULTISAMPLEBUFFERS, 0);
+    SDL_GL_SetAttribute(SDL_GL_MULTISAMPLESAMPLES, 0);
+    CT_BOOT("GL context attributes: ES 2.0, MSAA disabled");
 #endif
     
     game.screen_w = WINDOW_W;
@@ -10153,9 +10219,12 @@ int main(int argc, char *argv[])
 #ifdef __vita__
     wflags |= SDL_WINDOW_FULLSCREEN | SDL_WINDOW_OPENGL;
 #endif
+    CT_BOOT("SDL_CreateWindow / vitaGL init begin: %dx%d flags=0x%x", WINDOW_W, WINDOW_H, (unsigned)wflags);
     game.window = SDL_CreateWindow("ConciliaTower",
         SDL_WINDOWPOS_CENTERED, SDL_WINDOWPOS_CENTERED,
         WINDOW_W, WINDOW_H, wflags);
+    if (!game.window) return CT_FAIL("SDL_CreateWindow failed.");
+    CT_BOOT("SDL_CreateWindow done; SDL_CreateRenderer / GL context / shaders begin");
     
     /* Software renderer for VNC visibility */
 #if defined(__EMSCRIPTEN__) || defined(__vita__)
@@ -10164,10 +10233,32 @@ int main(int argc, char *argv[])
      * for sprites.c texture_to_surface readback. */
     game.renderer = SDL_CreateRenderer(game.window, -1,
         SDL_RENDERER_ACCELERATED | SDL_RENDERER_TARGETTEXTURE);
+    if (!game.renderer) {
+        CT_BOOT("Accelerated renderer failed: %s", SDL_GetError());
+#ifdef __vita__
+        /* Software fallback on an OPENGL Vita window is not a safe recovery. */
+        return vita_boot_fatal("SDL GLES2 renderer/context creation failed.");
+#endif
+    }
     if (!game.renderer)
 #endif
     /* Native stays software: the service runs under Xvfb/VNC with no GPU. */
     game.renderer = SDL_CreateRenderer(game.window, -1, SDL_RENDERER_SOFTWARE);
+    if (!game.renderer) return CT_FAIL("SDL_CreateRenderer failed.");
+    SDL_RendererInfo renderer_info;
+    if (SDL_GetRendererInfo(game.renderer, &renderer_info) == 0) {
+        CT_BOOT("renderer/context ready: %s flags=0x%x max texture=%dx%d",
+                renderer_info.name, (unsigned)renderer_info.flags,
+                renderer_info.max_texture_width, renderer_info.max_texture_height);
+        if (!(renderer_info.flags & SDL_RENDERER_TARGETTEXTURE))
+            return CT_FAIL("Renderer lacks required target-texture support.");
+    }
+    /* Exercise drawing/shader setup before decoding hundreds of textures. */
+    SDL_SetRenderDrawColor(game.renderer, 14, 22, 48, 255);
+    if (SDL_RenderClear(game.renderer) != 0) return CT_FAIL("Initial renderer clear failed.");
+    CT_BOOT("initial blank frame present begin");
+    SDL_RenderPresent(game.renderer);
+    CT_BOOT("initial blank frame presented");
 
     /* Replace the bare X-server root cursor with a proper arrow; the bulldozer
      * gets a crosshair. (SimTower swaps the cursor per active tool.) */
@@ -10177,14 +10268,26 @@ int main(int argc, char *argv[])
     if (game.cursor_arrow) SDL_SetCursor(game.cursor_arrow);
 
     /* Initialize SDL_ttf fonts */
+    CT_BOOT("font load begin");
     init_fonts();
+    CT_BOOT("font load done: main=%p small=%p info=%p dialog=%p SDL=%s",
+            (void*)game.font, (void*)game.font_small, (void*)game.font_info,
+            (void*)game.font_dlg, SDL_GetError());
+#ifdef __vita__
+    if (!game.font || !game.font_small || !game.font_info || !game.font_dlg)
+        return vita_boot_fatal("Packaged fonts failed to load. Reinstall VPK; see boot.log.");
+#endif
     
     /* Load sprites */
-    sprites_init(&game.sprites, &game.exe, game.renderer);
+    CT_BOOT("sprite decode/texture upload begin");
+    if (sprites_init(&game.sprites, &game.exe, game.renderer) != 0)
+        return CT_FAIL("Sprite asset upload failed. See boot.log.");
+    CT_BOOT("sprite upload done: %d textures", game.sprites.count);
 
     /* Audio: decode the EXE's 55 WAV effects and wire the sim's sound hook.
      * CT_SOUND_CAPTURE=<path> renders a WAV headless (no device) instead of
      * playing live. Event->sound map: referee_sound_events_2026-07-13.md. */
+    CT_BOOT("audio device and asset decode begin");
     g_sound_capture = getenv("CT_SOUND_CAPTURE") != NULL;
     if (g_sound_capture ? (audio_init_capture() == 0) : (audio_init() == 0)) {
         int nclips = audio_load_from_ne(&game.exe);
@@ -10194,6 +10297,8 @@ int main(int argc, char *argv[])
         if (g_sound_capture) audio_capture_begin();
         play_snd(SND_STARTUP);          /* intro jingle (referee row 23) */
     }
+
+    CT_BOOT("audio stage done; SDL error=%s; composite sprite processing begin", SDL_GetError());
 
     /* Queue silhouettes use white as transparent */
     sprites_apply_white_key(&game.sprites, game.renderer, SPR_ELEV_QUEUE);
@@ -10416,6 +10521,8 @@ int main(int argc, char *argv[])
         printf("Composites: %d built, %d failed\n", ok, fail);
     }
     
+    CT_BOOT("composite sprite processing done; cloud/sky asset processing begin");
+
     /* Load cloud sprites (5 different shapes at 0x8384-0x8388)
      * White pixels (0xFF,0xFF,0xFF) must be transparent — same as original game.
      * Re-decode from NE resources with SDL_SetColorKey before texture creation. */
@@ -10799,8 +10906,10 @@ int main(int argc, char *argv[])
     }
     
     /* Initialize tower and simulation */
+    CT_BOOT("tower/simulation init begin");
     tower_init(&game.tower);
     game_init(&game.sim);
+    CT_BOOT("tower/simulation init done; UI state setup begin");
     game.show_debug = 0;  /* Start with debug off, F1 to toggle */
     game.stats_x = game.stats_y = -1;   /* default placements until dragged */
     game.tune_x = game.tune_y = -1;
@@ -11117,6 +11226,7 @@ int main(int argc, char *argv[])
     game.build_type = ITEM_FLOOR;
 
     int frame = 0;
+    CT_BOOT("startup complete; game loop begin");
     while (game.running) {
         SDL_Event ev;
         while (SDL_PollEvent(&ev)) {
@@ -11821,6 +11931,7 @@ int main(int argc, char *argv[])
         if (!auto_screenshot) SDL_Delay(16); /* ~60fps */
     }
     
+    CT_BOOT("normal shutdown begin");
     /* Cleanup */
     sprites_free(&game.sprites);
     if (game.font) TTF_CloseFont(game.font);

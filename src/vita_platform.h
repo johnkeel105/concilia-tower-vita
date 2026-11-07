@@ -11,6 +11,13 @@
 extern "C" {
 #endif
 
+void vita_boot_begin(void);
+void vita_boot_notice(const char *message);
+void vita_boot_notice_end(void);
+void vita_boot_log(const char *fmt, ...) __attribute__((format(printf, 1, 2)));
+int vita_boot_fatal(const char *reason);
+int vita_probe_file(const char *path);
+int vita_shader_library_present(void);
 void vita_boost_clocks(void);
 void vita_prepare_userdata(void);
 void vita_try_expand_ex_(void);

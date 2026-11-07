@@ -3,6 +3,19 @@
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
+#include <limits.h>
+#ifdef __vita__
+#include "vita_platform.h"
+#define SPR_TRACE(...) vita_boot_log(__VA_ARGS__)
+#else
+#define SPR_TRACE(...) ((void)0)
+#endif
+
+/* Explicit little-endian loads also avoid unaligned pointer casts on ARM. */
+static uint32_t dib_u32(const uint8_t *p)
+{ return (uint32_t)p[0] | ((uint32_t)p[1] << 8) | ((uint32_t)p[2] << 16) | ((uint32_t)p[3] << 24); }
+static uint16_t dib_u16(const uint8_t *p)
+{ return (uint16_t)p[0] | ((uint16_t)p[1] << 8); }
 
 /* ---------- Palette loading ---------- */
 static int load_palette(SpriteAtlas *atlas, NEResourceTable *exe)
@@ -30,12 +43,14 @@ SDL_Surface *dib_to_surface(NEResource *res, SpriteAtlas *atlas)
     if (!res || res->length < 40) return NULL;
     
     uint8_t *data = res->data;
-    uint32_t hdr_size = *(uint32_t *)(data + 0);
-    int32_t  width    = *(int32_t  *)(data + 4);
-    int32_t  height   = *(int32_t  *)(data + 8);
-    uint16_t bpp      = *(uint16_t *)(data + 14);
+    uint32_t hdr_size = dib_u32(data);
+    int32_t width = (int32_t)dib_u32(data + 4);
+    int32_t height = (int32_t)dib_u32(data + 8);
+    uint16_t bpp = dib_u16(data + 14);
     
-    if (hdr_size < 40 || bpp != 8) return NULL;
+    if (hdr_size < 40 || hdr_size > (uint32_t)res->length || bpp != 8 ||
+        width <= 0 || width > INT_MAX - 3 || height == 0 || height == INT_MIN)
+        return NULL;
     
     int abs_height = height < 0 ? -height : height;
     int top_down = height < 0;
@@ -45,7 +60,12 @@ SDL_Surface *dib_to_surface(NEResource *res, SpriteAtlas *atlas)
     uint8_t *pixels = color_table + 256 * 4;
     
     /* Check if we have enough data for local palette + pixels */
-    int has_local_palette = (res->length >= (int)(hdr_size + 256 * 4 + row_bytes * abs_height));
+    uint64_t pixel_bytes = (uint64_t)row_bytes * abs_height;
+    if ((uint64_t)hdr_size + pixel_bytes > (uint64_t)res->length) {
+        SPR_TRACE("DIB truncated: id=0x%04x size=%d dims=%dx%d", res->id, res->length, width, height);
+        return NULL;
+    }
+    int has_local_palette = ((uint64_t)res->length >= hdr_size + 256 * 4 + pixel_bytes);
     if (!has_local_palette) {
         pixels = color_table; /* No room for local palette */
     }
@@ -123,7 +143,7 @@ int sprites_init(SpriteAtlas *atlas, NEResourceTable *exe, SDL_Renderer *rendere
         fprintf(stderr, "sprites: warning: no palette found\n");
     }
     
-    int loaded = 0;
+    int loaded = 0, upload_failures = 0;
     
     /* Load DIB bitmaps (type 0x8002) */
     NEResourceList *dibs = ne_find_type(exe, 0x8002);
@@ -140,6 +160,9 @@ int sprites_init(SpriteAtlas *atlas, NEResourceTable *exe, SDL_Renderer *rendere
                     s->w = surf->w;
                     s->h = surf->h;
                     loaded++;
+                } else {
+                    upload_failures++;
+                    SPR_TRACE("sprite texture upload failed: size=%dx%d SDL=%s", surf->w, surf->h, SDL_GetError());
                 }
                 SDL_FreeSurface(surf);
             }
@@ -161,6 +184,9 @@ int sprites_init(SpriteAtlas *atlas, NEResourceTable *exe, SDL_Renderer *rendere
                     s->w = surf->w;
                     s->h = surf->h;
                     loaded++;
+                } else {
+                    upload_failures++;
+                    SPR_TRACE("sprite texture upload failed: size=%dx%d SDL=%s", surf->w, surf->h, SDL_GetError());
                 }
                 SDL_FreeSurface(surf);
             }
@@ -169,7 +195,8 @@ int sprites_init(SpriteAtlas *atlas, NEResourceTable *exe, SDL_Renderer *rendere
     
     printf("Sprites: loaded %d textures (%d DIB + %d raw)\n", 
            loaded, dibs ? dibs->count : 0, raws ? raws->count : 0);
-    return 0;
+    SPR_TRACE("sprite texture upload result: loaded=%d failed=%d", loaded, upload_failures);
+    return loaded && !upload_failures ? 0 : -1;
 }
 
 Sprite *sprites_find(SpriteAtlas *atlas, uint16_t id)
@@ -217,10 +244,17 @@ static SDL_Surface *texture_to_surface(SDL_Renderer *renderer, SDL_Texture *tex,
         SDL_TEXTUREACCESS_TARGET, w, h);
     if (!target) { SDL_FreeSurface(surf); return NULL; }
     
-    SDL_SetRenderTarget(renderer, target);
-    SDL_RenderCopy(renderer, tex, NULL, NULL);
-    SDL_RenderReadPixels(renderer, NULL, SDL_PIXELFORMAT_ARGB8888, surf->pixels, surf->pitch);
-    SDL_SetRenderTarget(renderer, NULL);
+    SDL_Texture *previous = SDL_GetRenderTarget(renderer);
+    if (SDL_SetRenderTarget(renderer, target) != 0 ||
+        SDL_RenderCopy(renderer, tex, NULL, NULL) != 0 ||
+        SDL_RenderReadPixels(renderer, NULL, SDL_PIXELFORMAT_ARGB8888, surf->pixels, surf->pitch) != 0) {
+        SPR_TRACE("texture readback failed %dx%d: %s", w, h, SDL_GetError());
+        SDL_SetRenderTarget(renderer, previous);
+        SDL_DestroyTexture(target);
+        SDL_FreeSurface(surf);
+        return NULL;
+    }
+    SDL_SetRenderTarget(renderer, previous);
     SDL_DestroyTexture(target);
     return surf;
 }
@@ -242,7 +276,11 @@ int sprites_load_palette_cycled(SpriteAtlas *atlas, NEResourceTable *exe,
     uint8_t *copy = malloc(res->length);
     if (!copy) return -1;
     memcpy(copy, res->data, res->length);
-    uint32_t hdr_size = *(uint32_t *)(copy + 0);
+    uint32_t hdr_size = dib_u32(copy);
+    if (hdr_size < 40 || (uint64_t)hdr_size + 256 * 4 > (uint64_t)res->length) {
+        free(copy);
+        return -1;
+    }
     uint8_t *ct = copy + hdr_size;
     for (int s = 0; s < steps; s++) {
         for (int n = 0; n < 4; n++) {
