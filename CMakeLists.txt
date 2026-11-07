@@ -15,9 +15,9 @@ find_package(SDL2 REQUIRED)
 find_package(SDL2_ttf REQUIRED)
 find_package(Freetype REQUIRED)
 
-set(VITA_APP_NAME "ConciliaTower")
+set(VITA_APP_NAME "Concilia Tower")
 set(VITA_TITLEID  "CTWR00001")
-set(VITA_VERSION  "00.05")
+set(VITA_VERSION  "00.06")
 
 execute_process(
   COMMAND git describe --always --dirty
@@ -37,6 +37,7 @@ add_executable(${PROJECT_NAME}
   src/exe_prepare.c
   src/ne_resource.c
   src/sprites.c
+  src/texture.c
   src/tower.c
   src/game.c
   src/people.c

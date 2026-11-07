@@ -241,3 +241,66 @@ and vertical composition, transparent padding and cleanup, including all 261
 real EXE textures and a representative building composite. Fixed signed alpha
 left shifts found by UBSan. Cross-build and package checks pass. This is not yet
 a real-Vita gameplay validation; send `boot.log` if a later stage fails.
+
+
+## v0.6: renderer-bounded logical textures (APP_VER 00.06)
+
+Hardware reached native GXM, fonts and its first blank frame in v0.5. The two
+remaining failed uploads were raw animation strips **4416x36 and 5888x36**,
+exceeding GXM's advertised **4096x4096** maximum. They were not missing assets.
+
+`src/texture.c` now owns a typed logical texture abstraction used by **every
+sprite, palette-cycle frame, keyed replacement, composite, UI image and font
+texture**, including the direct draw calls in main.c. It queries actual
+SDL_RendererInfo limits and tiles oversized images on either axis, retaining
+original logical dimensions and source coordinates. A frame spanning a tile
+boundary draws the appropriate pieces; color/alpha/blend/scale settings and
+cleanup apply to every tile. Images within the limit keep SDL's direct path.
+Fractionally scaled cross-tile draws use a cached CPU crop (resampled only if
+the source crop itself exceeds the limit) to avoid
+SDL software-renderer rounding/phase seams; ordinary contained sprite frames
+stay on the direct GPU path. Extra CPU sources are retained only for oversized
+textures. An oversized optional viewport render target is safely disabled
+rather than pretending a partial target represents a whole image. The Vita's
+normal 960x544 target is within the cap.
+
+A failed cosmetic upload logs dimensions/SDL error and retains its logical
+size as a visible magenta placeholder. A single asset no longer makes the
+atlas fatal. Failed optional replacements keep the previous working image.
+No valid sprite assets remains a visible startup error, as before.
+
+Later-stage review/hardening:
+- Audio is initialized separately from critical video/controller startup, and
+  device/decode failures leave the game running silently rather than fatal.
+- Logs include device format, each WAV decode, PCM total and completion.
+  Stream conversion/get failures are checked rather than mixing uninitialized
+  data. All 58 supplied sounds decode/mix on the host (7,384,092 PCM bytes).
+- SDL worker thread stack request is 128 KiB before opening the audio device;
+  the mixer's 16 KiB automatic accumulator plus resampler needs headroom.
+  Compiler stack reports show a largest game function frame of 16,416 bytes
+  (mixer), tower drawing 8,968 bytes, main 920 bytes; the existing Vita main
+  stack/192 MiB heap remain. Binary BSS is about 4.8 MiB, not a giant stack.
+- First gameplay world drawing, UI drawing and actual presentation have
+  distinct watchdog/log stages. Shutdown stops audio before freeing samples
+  and releases all logical/UI/cached textures before destroying the renderer.
+
+ASan/UBSan host tests:
+- `tests/test_texture_tiles.c`: force caps **4096 and 1024**, compare tiled draws
+  pixel-for-pixel against an unbounded SDL reference. Includes both real strip
+  dimensions, tall and 2-D images, source-boundary crossings, integer/fractional
+  scaling, clipping, alpha/color modulation, keyed transparency, RGBA alpha,
+  injected upload failure/placeholder and cleanup.
+- `tests/test_sprite_cpu.c EXE LIMIT`: all **261 real textures** load without a
+  placeholder at both caps; CPU composition/key tests pass. An injected single
+  failed upload preserves a usable atlas rather than failing initialization.
+- `tests/test_audio_startup.c EXE`: all 58 clips decode and mix offline.
+Compile each with SDL2 headers/libs, `-Isrc -fsanitize=address,undefined`; texture
+suite links src/texture.c; sprite suite also links src/sprites.c and
+src/ne_resource.c; audio suite links src/audio.c and src/ne_resource.c.
+No copyrighted EXE/resource fixture is committed or packaged.
+
+Menu TITLE and launch-gate title are **Concilia Tower**. Backdrop is artwork
+only (no title/subtitle overlay), while the centered launch-gate text remains.
+All three PNGs stay 8-bit indexed. Release: `ConciliaTower-v0.6.vpk`.
+Cross-build/package/host tests pass; real-Vita gameplay validation is still
+needed. If it stops later, send `ux0:data/concilia-tower/boot.log` again.

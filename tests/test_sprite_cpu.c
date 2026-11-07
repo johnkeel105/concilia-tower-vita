@@ -1,10 +1,11 @@
 /* CPU sprite operations must never require renderer-target readback.
  * Host: cc -Isrc $(sdl2-config --cflags) tests/test_sprite_cpu.c
- *       src/sprites.c src/ne_resource.c $(sdl2-config --libs) -o /tmp/sprite-test
+ *       src/sprites.c src/texture.c src/ne_resource.c $(sdl2-config --libs) -o /tmp/sprite-test
  */
 #include "sprites.h"
 #include <assert.h>
 #include <stdio.h>
+#include <stdlib.h>
 
 static Uint32 pixel(SDL_Surface *s, int x, int y)
 { return ((Uint32 *)((Uint8 *)s->pixels + y * s->pitch))[x]; }
@@ -12,6 +13,7 @@ static Uint32 pixel(SDL_Surface *s, int x, int y)
 int main(int argc, char **argv)
 {
     assert(SDL_Init(0) == 0);
+    if (argc > 2) CT_TextureTestLimit(atoi(argv[2]), atoi(argv[2]));
     SDL_Surface *screen = SDL_CreateRGBSurfaceWithFormat(0, 64, 64, 32, SDL_PIXELFORMAT_ARGB8888);
     assert(screen);
     SDL_Renderer *r = SDL_CreateSoftwareRenderer(screen);
@@ -47,11 +49,16 @@ int main(int argc, char **argv)
         size_t bytes = 0;
         for (int i = 0; i < atlas.count; i++) {
             assert(atlas.sprites[i].pixels);
+            assert(!CT_TextureIsPlaceholder(atlas.sprites[i].texture));
             bytes += atlas.sprites[i].pixels->pitch * atlas.sprites[i].pixels->h;
         }
         printf("Real EXE: textures=%d CPU source bytes=%zu\n", atlas.count, bytes);
         assert(sprites_compose_h(&atlas, r, 0x86e8, 0x86e9, 0x00f0) == 0);
         assert(sprites_apply_white_key(&atlas, r, 0x00f0) == 0);
+        sprites_free(&atlas);
+        CT_TextureTestFailNextUpload();
+        assert(sprites_init(&atlas, &exe, r) == 0);
+        assert(atlas.count == 261 && CT_TextureIsPlaceholder(atlas.sprites[0].texture));
         sprites_free(&atlas);
         ne_free(&exe);
     }

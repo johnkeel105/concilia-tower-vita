@@ -151,8 +151,12 @@ int sprites_init(SpriteAtlas *atlas, NEResourceTable *exe, SDL_Renderer *rendere
         for (int i = 0; i < dibs->count && atlas->count < MAX_SPRITES; i++) {
             SDL_Surface *surf = dib_to_surface(&dibs->items[i], atlas);
             if (surf) {
-                SDL_Texture *tex = SDL_CreateTextureFromSurface(renderer, surf);
+                CT_Texture *tex = CT_CreateTextureFromSurface(renderer, surf);
                 if (tex) {
+                    if (CT_TextureIsPlaceholder(tex)) {
+                        upload_failures++;
+                        SPR_TRACE("sprite id=0x%04x degraded to placeholder", dibs->items[i].id);
+                    }
                     Sprite *s = &atlas->sprites[atlas->count++];
                     s->id = dibs->items[i].id;
                     s->type = 0x8002;
@@ -177,8 +181,12 @@ int sprites_init(SpriteAtlas *atlas, NEResourceTable *exe, SDL_Renderer *rendere
         for (int i = 0; i < raws->count && atlas->count < MAX_SPRITES; i++) {
             SDL_Surface *surf = raw_to_surface(&raws->items[i], atlas);
             if (surf) {
-                SDL_Texture *tex = SDL_CreateTextureFromSurface(renderer, surf);
+                CT_Texture *tex = CT_CreateTextureFromSurface(renderer, surf);
                 if (tex) {
+                    if (CT_TextureIsPlaceholder(tex)) {
+                        upload_failures++;
+                        SPR_TRACE("raw sprite id=0x%04x degraded to placeholder", raws->items[i].id);
+                    }
                     Sprite *s = &atlas->sprites[atlas->count++];
                     s->id = raws->items[i].id;
                     s->type = 0xFF02;
@@ -200,7 +208,7 @@ int sprites_init(SpriteAtlas *atlas, NEResourceTable *exe, SDL_Renderer *rendere
     printf("Sprites: loaded %d textures (%d DIB + %d raw)\n", 
            loaded, dibs ? dibs->count : 0, raws ? raws->count : 0);
     SPR_TRACE("sprite texture upload result: loaded=%d failed=%d", loaded, upload_failures);
-    return loaded && !upload_failures ? 0 : -1;
+    return loaded ? 0 : -1; /* A single missing cosmetic asset must not abort startup. */
 }
 
 Sprite *sprites_find(SpriteAtlas *atlas, uint16_t id)
@@ -224,7 +232,7 @@ void sprites_draw(SDL_Renderer *renderer, Sprite *sprite, int x, int y, SDL_Rect
     int w = src_rect ? src_rect->w : sprite->w;
     int h = src_rect ? src_rect->h : sprite->h;
     SDL_Rect dst = { x, y, w, h };
-    SDL_RenderCopy(renderer, sprite->texture, src_rect, &dst);
+    CT_RenderCopy(renderer, sprite->texture, src_rect, &dst);
 }
 
 void sprites_draw_scaled(SDL_Renderer *renderer, Sprite *sprite, 
@@ -232,7 +240,7 @@ void sprites_draw_scaled(SDL_Renderer *renderer, Sprite *sprite,
 {
     if (!sprite || !sprite->texture) return;
     SDL_Rect dst = { x, y, w, h };
-    SDL_RenderCopy(renderer, sprite->texture, src_rect, &dst);
+    CT_RenderCopy(renderer, sprite->texture, src_rect, &dst);
 }
 
 /* ---------- Sprite composition ---------- */
@@ -250,9 +258,11 @@ int sprites_replace_surface(Sprite *sprite, SDL_Renderer *renderer, SDL_Surface 
     if (!sprite || !surface) return -1;
     SDL_Surface *copy = SDL_ConvertSurface(surface, surface->format, 0);
     if (!copy) return -1;
-    SDL_Texture *texture = SDL_CreateTextureFromSurface(renderer, surface);
-    if (!texture) { SDL_FreeSurface(copy); return -1; }
-    SDL_DestroyTexture(sprite->texture);
+    CT_Texture *texture = CT_CreateTextureFromSurface(renderer, surface);
+    if (!texture || CT_TextureIsPlaceholder(texture)) {
+        CT_DestroyTexture(texture); SDL_FreeSurface(copy); return -1;
+    }
+    CT_DestroyTexture(sprite->texture);
     SDL_FreeSurface(sprite->pixels);
     sprite->texture = texture;
     sprite->pixels = copy;
@@ -299,7 +309,7 @@ int sprites_load_palette_cycled(SpriteAtlas *atlas, NEResourceTable *exe,
     SDL_Surface *surf = dib_to_surface(&tmp, atlas);
     free(copy);
     if (!surf) return -1;
-    SDL_Texture *tex = SDL_CreateTextureFromSurface(renderer, surf);
+    CT_Texture *tex = CT_CreateTextureFromSurface(renderer, surf);
     int w = surf->w, h = surf->h;
     if (!tex) { SDL_FreeSurface(surf); return -1; }
     Sprite *sp = &atlas->sprites[atlas->count++];
@@ -320,9 +330,9 @@ int sprites_apply_color_key(SpriteAtlas *atlas, SDL_Renderer *renderer,
     SDL_Surface *surf = sprite_to_surface(s);
     if (!surf) return -1;
     SDL_SetColorKey(surf, SDL_TRUE, SDL_MapRGB(surf->format, r, g, b));
-    SDL_Texture *tex = SDL_CreateTextureFromSurface(renderer, surf);
+    CT_Texture *tex = CT_CreateTextureFromSurface(renderer, surf);
     if (!tex) { SDL_FreeSurface(surf); return -1; }
-    SDL_DestroyTexture(s->texture);
+    CT_DestroyTexture(s->texture);
     SDL_FreeSurface(s->pixels);
     s->pixels = surf;
     s->texture = tex;
@@ -364,7 +374,7 @@ int sprites_compose_h(SpriteAtlas *atlas, SDL_Renderer *renderer,
     SDL_FreeSurface(lsurf);
     SDL_FreeSurface(rsurf);
     
-    SDL_Texture *tex = SDL_CreateTextureFromSurface(renderer, combined);
+    CT_Texture *tex = CT_CreateTextureFromSurface(renderer, combined);
     if (!tex) { SDL_FreeSurface(combined); return -1; }
     
     Sprite *s = &atlas->sprites[atlas->count++];
@@ -410,7 +420,7 @@ int sprites_compose_v(SpriteAtlas *atlas, SDL_Renderer *renderer,
     /* Apply white transparency mask (stairs, escalators use white as transparent) */
     SDL_SetColorKey(combined, SDL_TRUE, SDL_MapRGB(combined->format, 0xFF, 0xFF, 0xFF));
     
-    SDL_Texture *tex = SDL_CreateTextureFromSurface(renderer, combined);
+    CT_Texture *tex = CT_CreateTextureFromSurface(renderer, combined);
     if (!tex) { SDL_FreeSurface(combined); return -1; }
     
     Sprite *s = &atlas->sprites[atlas->count++];
@@ -429,7 +439,7 @@ void sprites_free(SpriteAtlas *atlas)
     for (int i = 0; i < atlas->count; i++) {
         SDL_FreeSurface(atlas->sprites[i].pixels);
         if (atlas->sprites[i].texture)
-            SDL_DestroyTexture(atlas->sprites[i].texture);
+            CT_DestroyTexture(atlas->sprites[i].texture);
     }
     memset(atlas, 0, sizeof(*atlas));
 }

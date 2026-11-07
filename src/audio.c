@@ -6,6 +6,13 @@
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
+#include <limits.h>
+#ifdef __vita__
+#include "vita_platform.h"
+#define AUDIO_TRACE(...) vita_boot_log(__VA_ARGS__)
+#else
+#define AUDIO_TRACE(...) SDL_Log(__VA_ARGS__)
+#endif
 
 #define MAX_CLIPS   128   /* the EXE has 58 sounds; headroom */
 #define MAX_VOICES  16    /* voice-table size */
@@ -143,10 +150,19 @@ int audio_init(void)
     want.callback = audio_callback;
 
     /* Ensure the audio subsystem is up (main may have SDL_INIT_AUDIO'd already). */
-    if (!SDL_WasInit(SDL_INIT_AUDIO)) SDL_InitSubSystem(SDL_INIT_AUDIO);
+    if (!SDL_WasInit(SDL_INIT_AUDIO) && SDL_InitSubSystem(SDL_INIT_AUDIO) != 0) {
+        AUDIO_TRACE("audio subsystem unavailable: %s; sound disabled", SDL_GetError());
+        return -1;
+    }
+    AUDIO_TRACE("audio open begin: driver=%s request=%dHz mono S16 samples=%d",
+                SDL_GetCurrentAudioDriver(), want.freq, want.samples);
 
     A.dev = SDL_OpenAudioDevice(NULL, 0, &want, &have, 0);
     if (A.dev == 0) {
+#ifdef __vita__
+        AUDIO_TRACE("Vita audio open failed: %s; continuing without sound", SDL_GetError());
+        return -1;
+#else
         /* Headless Pi: no sink. Fall back to the dummy driver so the mixer and
          * capture tap still run. */
         SDL_QuitSubSystem(SDL_INIT_AUDIO);
@@ -158,7 +174,10 @@ int audio_init(void)
             return -1;
         }
         fprintf(stderr, "audio: using dummy driver (headless); capture available\n");
+#endif
     }
+    AUDIO_TRACE("audio device ready: id=%u client=%dHz channels=%d format=0x%x samples=%d",
+                (unsigned)A.dev, have.freq, have.channels, have.format, have.samples);
     SDL_PauseAudioDevice(A.dev, 0);
     A.ready = 1;
     return 0;
@@ -197,13 +216,15 @@ static int decode_wav(const NEResource *r, Clip *out)
     SDL_AudioStream *st = SDL_NewAudioStream(spec.format, spec.channels, spec.freq,
                                              AUDIO_S16SYS, 1, AUDIO_DEV_FREQ);
     if (!st) { SDL_FreeWAV(buf); return -1; }
-    SDL_AudioStreamPut(st, buf, (int)blen);
-    SDL_AudioStreamFlush(st);
+    if (blen > INT_MAX || SDL_AudioStreamPut(st, buf, (int)blen) < 0 ||
+        SDL_AudioStreamFlush(st) < 0) {
+        SDL_FreeAudioStream(st); SDL_FreeWAV(buf); return -1;
+    }
     int avail = SDL_AudioStreamAvailable(st);
     int16_t *pcm = NULL;
     if (avail > 0) {
         pcm = malloc((size_t)avail);
-        if (pcm) SDL_AudioStreamGet(st, pcm, avail);
+        if (pcm && SDL_AudioStreamGet(st, pcm, avail) != avail) { free(pcm); pcm = NULL; }
     }
     SDL_FreeAudioStream(st);
     SDL_FreeWAV(buf);
@@ -219,11 +240,16 @@ int audio_load_from_ne(NEResourceTable *exe)
 {
     NEResourceList *l = ne_find_type(exe, NE_RT_SOUND);
     if (!l) return 0;
+    size_t total = 0;
     for (int i = 0; i < l->count && A.clip_count < MAX_CLIPS; i++) {
         Clip c;
-        if (decode_wav(&l->items[i], &c) == 0)
+        AUDIO_TRACE("audio decode clip=%d/%d id=0x%04x bytes=%d", i+1, l->count, l->items[i].id, l->items[i].length);
+        if (decode_wav(&l->items[i], &c) == 0) {
             A.clips[A.clip_count++] = c;
+            total += (size_t)c.frames * sizeof(int16_t);
+        } else AUDIO_TRACE("audio clip skipped id=0x%04x: %s", l->items[i].id, SDL_GetError());
     }
+    AUDIO_TRACE("audio clips ready=%d PCM bytes=%u", A.clip_count, (unsigned)total);
     return A.clip_count;
 }
 

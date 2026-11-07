@@ -7,6 +7,7 @@
 #define SPRITES_H
 
 #include <SDL.h>
+#include "texture.h"
 #include "ne_resource.h"
 
 /* Maximum sprites we'll ever need */
@@ -15,7 +16,7 @@
 typedef struct {
     uint16_t     id;        /* Resource ID (e.g., 0x8568 = lobby) */
     uint16_t     type;      /* Resource type (0x8002 = DIB, 0xFF02 = raw) */
-    SDL_Texture *texture;   /* GPU texture for rendering */
+    CT_Texture *texture;   /* GPU texture for rendering */
     SDL_Surface *pixels;    /* CPU source for keys/composites; no GPU readback */
     int          w, h;      /* Dimensions in pixels */
 } Sprite;

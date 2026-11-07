@@ -450,7 +450,7 @@ typedef struct {
     int             crane_x;     /* left edge captured at that moment */
     Sprite         *fireladder;  /* 0x842D — fire escape stairs */
     Sprite         *skyline;     /* 0x8389 — city skyline background */
-    SDL_Texture    *queue_hot;   /* white clone of the queue silhouettes —
+    CT_Texture    *queue_hot;   /* white clone of the queue silhouettes —
                                   * color-mod can only DARKEN, so tinting the
                                   * black figures pink/red needs a white base */
     int             cloud_count;
@@ -463,17 +463,17 @@ typedef struct {
     Sprite         *alert_fire;     /* 0xA714 — fire alert icon (76x60) */
     
     /* UI bitmaps from EXE */
-    SDL_Texture    *ui_items;    /* Toolbox item icons: 32 icons × 32px each, 3 rows (normal+pressed) */
+    CT_Texture    *ui_items;    /* Toolbox item icons: 32 icons × 32px each, 3 rows (normal+pressed) */
     int             ui_items_w, ui_items_h;
-    SDL_Texture    *ui_timebar;  /* Info bar background (431×41) */
+    CT_Texture    *ui_timebar;  /* Info bar background (431×41) */
     int             ui_timebar_w, ui_timebar_h;
-    SDL_Texture    *ui_star[2];  /* Star rating: [0]=empty, [1]=filled (24×19 each) */
+    CT_Texture    *ui_star[2];  /* Star rating: [0]=empty, [1]=filled (24×19 each) */
     int             ui_star_w, ui_star_h;
-    SDL_Texture    *ui_speed;    /* Speed buttons (4 states, normal + pressed) */
+    CT_Texture    *ui_speed;    /* Speed buttons (4 states, normal + pressed) */
     int             ui_speed_w, ui_speed_h;
-    SDL_Texture    *ui_tools;    /* Tool buttons (bulldozer/finger/inspector) */
+    CT_Texture    *ui_tools;    /* Tool buttons (bulldozer/finger/inspector) */
     int             ui_tools_w, ui_tools_h;
-    SDL_Texture    *ui_map;      /* Map background (200×288) */
+    CT_Texture    *ui_map;      /* Map background (200×288) */
     int             ui_map_w, ui_map_h;
     
     /* Win3.1 Menu system */
@@ -1026,12 +1026,12 @@ static void format_money(long amount, char *buf, int bufsize)
 }
 
 /* Render text to a texture, returns texture and sets w/h */
-static SDL_Texture *render_text(const char *text, SDL_Color color, int *w, int *h)
+static CT_Texture *render_text(const char *text, SDL_Color color, int *w, int *h)
 {
     if (!game.font || !text || !text[0]) return NULL;
     SDL_Surface *surf = TTF_RenderUTF8_Blended(game.font, text, color);
     if (!surf) return NULL;
-    SDL_Texture *tex = SDL_CreateTextureFromSurface(game.renderer, surf);
+    CT_Texture *tex = CT_CreateTextureFromSurface(game.renderer, surf);
     *w = surf->w;
     *h = surf->h;
     SDL_FreeSurface(surf);
@@ -1042,11 +1042,11 @@ static SDL_Texture *render_text(const char *text, SDL_Color color, int *w, int *
 static int draw_text(const char *text, int x, int y, SDL_Color color)
 {
     int w, h;
-    SDL_Texture *tex = render_text(text, color, &w, &h);
+    CT_Texture *tex = render_text(text, color, &w, &h);
     if (!tex) return 0;
     SDL_Rect dst = { x, y, w, h };
-    SDL_RenderCopy(game.renderer, tex, NULL, &dst);
-    SDL_DestroyTexture(tex);
+    CT_RenderCopy(game.renderer, tex, NULL, &dst);
+    CT_DestroyTexture(tex);
     return w;
 }
 
@@ -1158,7 +1158,7 @@ static void render_sky(void)
             int row_h = cs->h / 4;  /* Each row = 1/4 of total height */
             if (row_h < 1) row_h = cs->h;
             
-            SDL_SetTextureAlphaMod(cs->texture, 180);
+            CT_SetTextureAlphaMod(cs->texture, 180);
             
             int cx = lobby_sx + CLOUD_POSITIONS[i].x;
             int cy = lobby_sy + CLOUD_POSITIONS[i].y;
@@ -1172,9 +1172,9 @@ static void render_sky(void)
                 if (cy + row_h < 0 || cy > game.screen_h) continue;
                 
                 SDL_Rect dst = { tx, cy, cs->w, row_h };
-                SDL_RenderCopy(game.renderer, cs->texture, &src, &dst);
+                CT_RenderCopy(game.renderer, cs->texture, &src, &dst);
             }
-            SDL_SetTextureAlphaMod(cs->texture, 255);
+            CT_SetTextureAlphaMod(cs->texture, 255);
         }
     }
     
@@ -1200,7 +1200,7 @@ static void render_sky(void)
             lobby_sy + CELL_H - 0x84c + game.sim.santa.y,
             game.santa->w, game.santa->h
         };
-        SDL_RenderCopy(game.renderer, game.santa->texture, NULL, &dst);
+        CT_RenderCopy(game.renderer, game.santa->texture, NULL, &dst);
     }
     
     /* City skyline — tiled at ground level (from Sky.cpp).
@@ -1220,9 +1220,9 @@ static void render_sky(void)
             int mr = 255 - (int)ta * (255 - (int)tr) / 255;
             int mg = 255 - (int)ta * (255 - (int)tg) / 255;
             int mb = 255 - (int)ta * (255 - (int)tb) / 255;
-            SDL_SetTextureColorMod(game.skyline->texture, mr, mg, mb);
+            CT_SetTextureColorMod(game.skyline->texture, mr, mg, mb);
         } else {
-            SDL_SetTextureColorMod(game.skyline->texture, 255, 255, 255);
+            CT_SetTextureColorMod(game.skyline->texture, 255, 255, 255);
         }
         
         /* Skyline scrolls horizontally with the camera, wrapped at the 96px
@@ -1235,10 +1235,10 @@ static void render_sky(void)
         int shift = (int)game.cam_fx % tile_w;   /* world scroll, may be < 0 */
         for (int sx = -tile_w - shift; sx < game.screen_w + tile_w; sx += tile_w) {
             SDL_Rect dst = { sx, skyline_y, tile_w, game.skyline->h };
-            SDL_RenderCopy(game.renderer, game.skyline->texture, NULL, &dst);
+            CT_RenderCopy(game.renderer, game.skyline->texture, NULL, &dst);
         }
         /* Reset color mod */
-        SDL_SetTextureColorMod(game.skyline->texture, 255, 255, 255);
+        CT_SetTextureColorMod(game.skyline->texture, 255, 255, 255);
         SDL_SetRenderDrawBlendMode(game.renderer, SDL_BLENDMODE_NONE);
     }
     
@@ -1378,7 +1378,7 @@ static void draw_shaft_digits(int tx, int ty, int w, int wf, int hot)
         if (wf >= -2) {
             SDL_Rect src = { 16 * (-wf - 1), 0, 16, 36 };
             SDL_Rect dst = { tx + (w - 16) / 2, ty, 16, 36 };
-            SDL_RenderCopy(game.renderer, b->texture, &src, &dst);
+            CT_RenderCopy(game.renderer, b->texture, &src, &dst);
         } else {
             /* Deeper floors: the B and digit tiles are full 16x36 shaft
              * SECTIONS with the glyph baked over the shaft art — stamp
@@ -1389,8 +1389,8 @@ static void draw_shaft_digits(int tx, int ty, int w, int wf, int hot)
             int x = tx + (w - 32) / 2;
             SDL_Rect db = { x, ty, 16, 36 };
             SDL_Rect dd = { x + 16, ty, 16, 36 };
-            SDL_RenderCopy(game.renderer, b->texture, &sb, &db);
-            SDL_RenderCopy(game.renderer, b->texture, &sd, &dd);
+            CT_RenderCopy(game.renderer, b->texture, &sb, &db);
+            CT_RenderCopy(game.renderer, b->texture, &sd, &dd);
         }
         return;
     }
@@ -1405,7 +1405,7 @@ static void draw_shaft_digits(int tx, int ty, int w, int wf, int hot)
     for (int i = 0; i < n; i++) {
         SDL_Rect src = { 1 + 16 * (buf[i] - '0'), 16, 11, 17 };
         SDL_Rect dst = { x, ty + 10, 11, 17 };
-        SDL_RenderCopy(game.renderer, d->texture, &src, &dst);
+        CT_RenderCopy(game.renderer, d->texture, &src, &dst);
         x += 12;
     }
 }
@@ -1510,7 +1510,7 @@ static void render_tower(void)
             if (floor_strip) {
                 SDL_Rect src = { 16, 0, 2, 36 };
                 SDL_Rect dst = { wall_x, sy_base, wall_w, CELL_H };
-                SDL_RenderCopy(game.renderer, floor_strip->texture, &src, &dst);
+                CT_RenderCopy(game.renderer, floor_strip->texture, &src, &dst);
             } else {
                 /* fallback: joist band + dark interior */
                 SDL_SetRenderDrawColor(game.renderer, 64, 64, 64, 255);
@@ -1550,7 +1550,7 @@ static void render_tower(void)
             grid_to_screen(metro->floor, 0, &sx, &sy);
             for (int x = 0; x < TOWER_WIDTH; x += 4) {
                 SDL_Rect dst = { sx + x * CELL_W, sy, 4 * CELL_W, CELL_H };
-                SDL_RenderCopy(game.renderer, tracks->texture, NULL, &dst);
+                CT_RenderCopy(game.renderer, tracks->texture, NULL, &dst);
             }
         }
     }
@@ -1648,7 +1648,7 @@ static void render_tower(void)
                     if (bsx + bw < 0 || bsx > game.screen_w) continue;
                     SDL_Rect src_body = { base, 0, bw, sheet->h };
                     SDL_Rect dst_body = { bsx, ty, bw, CELL_H };
-                    SDL_RenderCopy(game.renderer, sheet->texture, &src_body, &dst_body);
+                    CT_RenderCopy(game.renderer, sheet->texture, &src_body, &dst_body);
                 }
                 /* Facade overlay — once, at the left edge, on top of the body. */
                 {
@@ -1657,7 +1657,7 @@ static void render_tower(void)
                     if (fw > 0 && !(tx + fw < 0 || tx > game.screen_w)) {
                         SDL_Rect src_cap = { base + 272, 0, fw, sheet->h };
                         SDL_Rect dst_cap = { tx, ty, fw, CELL_H };
-                        SDL_RenderCopy(game.renderer, sheet->texture, &src_cap, &dst_cap);
+                        CT_RenderCopy(game.renderer, sheet->texture, &src_cap, &dst_cap);
                     }
                 }
                 continue;
@@ -1937,20 +1937,20 @@ static void render_tower(void)
                             if (cgrid->h < CELL_H && scaf) {
                                 SDL_Rect cs = { 0, 0, gw, CEIL_H };
                                 SDL_Rect cd = { gx, fy, gw, CEIL_H };
-                                SDL_RenderCopy(game.renderer, scaf->texture,
+                                CT_RenderCopy(game.renderer, scaf->texture,
                                                &cs, &cd);
                             }
                             SDL_Rect gs = { 0, 0, gw, cgrid->h };
                             SDL_Rect gd = { gx, fy + CELL_H - cgrid->h,
                                             gw, cgrid->h };
-                            SDL_RenderCopy(game.renderer, cgrid->texture, &gs, &gd);
+                            CT_RenderCopy(game.renderer, cgrid->texture, &gs, &gd);
                         }
                     }
                 } else {
                     if (tenant->state == TENANT_CONSTRUCTION) frame_idx = 0;
                     SDL_Rect src = { frame_idx * frame_w_hint, 0, frame_w_hint, spr->h };
                     SDL_Rect dst = { tx, draw_y, tw, draw_h };
-                    SDL_RenderCopy(game.renderer, spr->texture, &src, &dst);
+                    CT_RenderCopy(game.renderer, spr->texture, &src, &dst);
                 }
 
                 /* The garbage truck (fill state 6, 7:00-7:24 AM): 0x892E
@@ -1966,14 +1966,14 @@ static void render_tower(void)
                         /* sheet split: 24px upper + 36px lower of 60 */
                         SDL_Rect td = { tx, draw_y + draw_h * 24 / 60,
                                         tw, draw_h * 36 / 60 };
-                        SDL_RenderCopy(game.renderer, truck->texture,
+                        CT_RenderCopy(game.renderer, truck->texture,
                                        NULL, &td);
                     }
                 }
             } else if (spr) {
                 /* Full sprite, no frame extraction — scale to fit */
                 SDL_Rect dst = { tx, draw_y, tw, draw_h };
-                SDL_RenderCopy(game.renderer, spr->texture, NULL, &dst);
+                CT_RenderCopy(game.renderer, spr->texture, NULL, &dst);
             } else {
                 /* Fallback: colored rectangle with label */
                 uint8_t r, g, b;
@@ -2002,7 +2002,7 @@ static void render_tower(void)
                     if (seg > remaining) seg = remaining;
                     SDL_Rect src = { sx, 0, seg, rub->h };
                     SDL_Rect dst = { dx, tenant_y, seg, rub->h };
-                    SDL_RenderCopy(game.renderer, rub->texture, &src, &dst);
+                    CT_RenderCopy(game.renderer, rub->texture, &src, &dst);
                     dx += seg; remaining -= seg; sx = 0;
                 }
             }
@@ -2066,11 +2066,11 @@ static void render_tower(void)
             grid_to_screen(0, ovl_left[gi], &tx, &ty);
             SDL_Rect src_l = { 0, 0, half_w, game.entrances->h };
             SDL_Rect awning_l = { tx - half_w, ty, half_w, CELL_H };
-            SDL_RenderCopy(game.renderer, game.entrances->texture, &src_l, &awning_l);
+            CT_RenderCopy(game.renderer, game.entrances->texture, &src_l, &awning_l);
             grid_to_screen(0, ovl_right[gi], &tx, &ty);
             SDL_Rect src_r = { half_w, 0, half_w, game.entrances->h };
             SDL_Rect awning_r = { tx, ty, half_w, CELL_H };
-            SDL_RenderCopy(game.renderer, game.entrances->texture, &src_r, &awning_r);
+            CT_RenderCopy(game.renderer, game.entrances->texture, &src_r, &awning_r);
         }
     }
 
@@ -2087,10 +2087,10 @@ static void render_tower(void)
             grid_to_screen(floor, ovl_right[fidx], &rx, &ry);
             SDL_Rect src_left = { 0, 0, half_w, game.fireladder->h };
             SDL_Rect fe_left = { lx - half_w, ly, half_w, CELL_H };
-            SDL_RenderCopy(game.renderer, game.fireladder->texture, &src_left, &fe_left);
+            CT_RenderCopy(game.renderer, game.fireladder->texture, &src_left, &fe_left);
             SDL_Rect src_right = { half_w, 0, half_w, game.fireladder->h };
             SDL_Rect fe_right = { rx, ry, half_w, CELL_H };
-            SDL_RenderCopy(game.renderer, game.fireladder->texture, &src_right, &fe_right);
+            CT_RenderCopy(game.renderer, game.fireladder->texture, &src_right, &fe_right);
         }
     }
 
@@ -2130,18 +2130,18 @@ static void render_tower(void)
         if (tw == 48) {
             Sprite *ext = sprites_find(&game.sprites, SPR_ELEV_EXT);
             SDL_Rect mid = { tx + 8, ty, 32, CELL_H };
-            SDL_RenderCopy(game.renderer, spr->texture, &src, &mid);
+            CT_RenderCopy(game.renderer, spr->texture, &src, &mid);
             if (ext) {
                 SDL_Rect sl = { 0, 0, 8, ext->h };
                 SDL_Rect dl = { tx, ty, 8, CELL_H };
                 SDL_Rect sr = { 8, 0, 8, ext->h };
                 SDL_Rect dr = { tx + 40, ty, 8, CELL_H };
-                SDL_RenderCopy(game.renderer, ext->texture, &sl, &dl);
-                SDL_RenderCopy(game.renderer, ext->texture, &sr, &dr);
+                CT_RenderCopy(game.renderer, ext->texture, &sl, &dl);
+                CT_RenderCopy(game.renderer, ext->texture, &sr, &dr);
             }
         } else {
             SDL_Rect dst = { tx, ty, tw, CELL_H };
-            SDL_RenderCopy(game.renderer, spr->texture, &src, &dst);
+            CT_RenderCopy(game.renderer, spr->texture, &src, &dst);
         }
         /* floor number, on serviced stops only (as the original) */
         int fi = floor_to_index(t->floor);
@@ -2218,7 +2218,7 @@ static void render_tower(void)
                     int ly;
                     grid_to_screen(t->floor + rise - L, t->x, &tx, &ly);
                     SDL_Rect dst = { tx, ly, tw, CELL_H };
-                    SDL_RenderCopy(game.renderer, sheet->texture, &src, &dst);
+                    CT_RenderCopy(game.renderer, sheet->texture, &src, &dst);
                 }
                 continue;
             }
@@ -2249,7 +2249,7 @@ static void render_tower(void)
             int draw_h = spr->h;
             int draw_y = ty + CELL_H - draw_h;
             SDL_Rect dst = { tx, draw_y, tw, draw_h };
-            SDL_RenderCopy(game.renderer, spr->texture, &src, &dst);
+            CT_RenderCopy(game.renderer, spr->texture, &src, &dst);
         } else {
             /* Fallback: semi-transparent overlay */
             SDL_SetRenderDrawBlendMode(game.renderer, SDL_BLENDMODE_BLEND);
@@ -2290,10 +2290,10 @@ static void render_tower(void)
                 
                 SDL_Surface *ts = TTF_RenderText_Blended(game.font_small, flabel, white);
                 if (ts) {
-                    SDL_Texture *tt = SDL_CreateTextureFromSurface(game.renderer, ts);
+                    CT_Texture *tt = CT_CreateTextureFromSurface(game.renderer, ts);
                     SDL_Rect dst = { 2, fsy + CELL_H/2 - ts->h/2, ts->w, ts->h };
-                    SDL_RenderCopy(game.renderer, tt, NULL, &dst);
-                    SDL_DestroyTexture(tt);
+                    CT_RenderCopy(game.renderer, tt, NULL, &dst);
+                    CT_DestroyTexture(tt);
                     SDL_FreeSurface(ts);
                 }
             }
@@ -2336,11 +2336,11 @@ static void render_tower(void)
             
             SDL_Surface *ts = TTF_RenderText_Blended(game.font_small, info, yellow);
             if (ts) {
-                SDL_Texture *tt = SDL_CreateTextureFromSurface(game.renderer, ts);
+                CT_Texture *tt = CT_CreateTextureFromSurface(game.renderer, ts);
                 int label_y = ty + CELL_H / 2 - ts->h / 2;
                 SDL_Rect dst = { tx + 4, label_y, ts->w, ts->h };
-                SDL_RenderCopy(game.renderer, tt, NULL, &dst);
-                SDL_DestroyTexture(tt);
+                CT_RenderCopy(game.renderer, tt, NULL, &dst);
+                CT_DestroyTexture(tt);
                 SDL_FreeSurface(ts);
             }
         }
@@ -2371,11 +2371,11 @@ static void stats_plot(int gx, int gy, int gw, int gh,
 static void stats_label(int x, int y, const char *text, SDL_Color col)
 {
     int tw, th;
-    SDL_Texture *t = render_text(text, col, &tw, &th);
+    CT_Texture *t = render_text(text, col, &tw, &th);
     if (!t) return;
     SDL_Rect dst = { x, y, tw, th };
-    SDL_RenderCopy(game.renderer, t, NULL, &dst);
-    SDL_DestroyTexture(t);
+    CT_RenderCopy(game.renderer, t, NULL, &dst);
+    CT_DestroyTexture(t);
 }
 
 #define STATS_W 470
@@ -2923,7 +2923,7 @@ static void elv_mode_glyph(int cx, int cy, int mode)
     if (icon) {
         SDL_Rect dst = { cx - icon->w / 2, cy - icon->h / 2,
                          icon->w, icon->h };
-        SDL_RenderCopy(game.renderer, icon->texture, NULL, &dst);
+        CT_RenderCopy(game.renderer, icon->texture, NULL, &dst);
         return;
     }
     /* fallback pictograph if the bitmap is missing */
@@ -3003,7 +3003,7 @@ static void render_elv_dialog_faithful(void)
     Sprite *bg = sprites_find(&game.sprites, SPR_ELV_DIALOG);
     if (bg) {
         SDL_Rect dst = { bx, by, ELV_DLG_W, ELV_DLG_H };
-        SDL_RenderCopy(game.renderer, bg->texture, NULL, &dst);
+        CT_RenderCopy(game.renderer, bg->texture, NULL, &dst);
     } else {
         elv_box(bx, by, 0, 0, ELV_DLG_W, ELV_DLG_H, 192, 192, 192, 1);
     }
@@ -3048,12 +3048,12 @@ static void render_elv_dialog_faithful(void)
         int py = ELV_PCELL_Y + ELV_PCELL_H + 2;
         if (mn && mn->texture) {
             SDL_Rect dst = { bx + px, by + py, mn->w, mn->h };
-            SDL_RenderCopy(game.renderer, mn->texture, NULL, &dst);
+            CT_RenderCopy(game.renderer, mn->texture, NULL, &dst);
             int cur = s->sched_mode[game.elv_day][game.elv_period];
             if (mp && mp->texture && cur >= 0 && cur < 3) {
                 SDL_Rect src = { 0, cur * 22, 82, 22 };
                 SDL_Rect pd  = { bx + px, by + py + cur * 22, 82, 22 };
-                SDL_RenderCopy(game.renderer, mp->texture, &src, &pd);
+                CT_RenderCopy(game.renderer, mp->texture, &src, &pd);
             }
         }
     }
@@ -3098,12 +3098,12 @@ static void render_elv_dialog_faithful(void)
                 SDL_Surface *ts =
                     TTF_RenderText_Blended(game.font_small, fl, ink);
                 if (ts) {
-                    SDL_Texture *tt =
-                        SDL_CreateTextureFromSurface(game.renderer, ts);
+                    CT_Texture *tt =
+                        CT_CreateTextureFromSurface(game.renderer, ts);
                     SDL_Rect dst = { gx0 - 3 - ts->w, cy + 6 - ts->h / 2,
                                      ts->w, ts->h };
-                    SDL_RenderCopy(game.renderer, tt, NULL, &dst);
-                    SDL_DestroyTexture(tt);
+                    CT_RenderCopy(game.renderer, tt, NULL, &dst);
+                    CT_DestroyTexture(tt);
                     SDL_FreeSurface(ts);
                 }
             }
@@ -3194,7 +3194,7 @@ static void render_elv_dialog_faithful(void)
         if (rs) {
             SDL_Rect btn = { 17, 404, 66, 19 };
             SDL_Rect dst = { bx + btn.x, by + btn.y, btn.w, btn.h };
-            SDL_RenderCopy(game.renderer, rs->texture, &btn, &dst);
+            CT_RenderCopy(game.renderer, rs->texture, &btn, &dst);
         } else {
             int sxb = bx + 10, syb = by + 398;
             SDL_SetRenderDrawColor(game.renderer, 30, 60, 120, 255);
@@ -3261,11 +3261,11 @@ static void render_elv_dialog(void)
 static void draw_text_right(const char *text, int right_x, int y, SDL_Color c)
 {
     int w, h;
-    SDL_Texture *tex = render_text(text, c, &w, &h);
+    CT_Texture *tex = render_text(text, c, &w, &h);
     if (!tex) return;
     SDL_Rect dst = { right_x - w, y, w, h };
-    SDL_RenderCopy(game.renderer, tex, NULL, &dst);
-    SDL_DestroyTexture(tex);
+    CT_RenderCopy(game.renderer, tex, NULL, &dst);
+    CT_DestroyTexture(tex);
 }
 
 /* Small variant for the 13px-pitch ledger grid — the 14px UI font overflowed
@@ -3276,11 +3276,11 @@ static void draw_text_right_small(const char *text, int right_x, int y,
     if (!game.font_small || !text || !text[0]) return;
     SDL_Surface *surf = TTF_RenderUTF8_Blended(game.font_small, text, c);
     if (!surf) return;
-    SDL_Texture *tex = SDL_CreateTextureFromSurface(game.renderer, surf);
+    CT_Texture *tex = CT_CreateTextureFromSurface(game.renderer, surf);
     SDL_Rect dst = { right_x - surf->w, y, surf->w, surf->h };
-    SDL_RenderCopy(game.renderer, tex, NULL, &dst);
+    CT_RenderCopy(game.renderer, tex, NULL, &dst);
     SDL_FreeSurface(surf);
-    SDL_DestroyTexture(tex);
+    CT_DestroyTexture(tex);
 }
 
 /* y of ledger row `row` (0..8), dialog-local. The art's label rows sit at
@@ -3314,7 +3314,7 @@ static void render_fin_dialog(void)
     Sprite *bg = sprites_find(&game.sprites, SPR_FIN_DIALOG);
     if (bg) {
         SDL_Rect dst = { bx, by, FIN_DLG_W, FIN_DLG_H };
-        SDL_RenderCopy(game.renderer, bg->texture, NULL, &dst);
+        CT_RenderCopy(game.renderer, bg->texture, NULL, &dst);
     } else {
         SDL_SetRenderDrawColor(game.renderer, 192, 192, 192, 255);
         SDL_Rect r = { bx, by, FIN_DLG_W, FIN_DLG_H };
@@ -3658,7 +3658,7 @@ static void render_occupants(void)
             grid_to_screen(t->floor, t->x + o->x[k], &sx, &sy);
             SDL_Rect src = { fx, 0, 16, 24 };
             SDL_Rect dst = { sx, sy + CELL_H - 24, 16, 24 };
-            SDL_RenderCopy(game.renderer, spr->texture, &src, &dst);
+            CT_RenderCopy(game.renderer, spr->texture, &src, &dst);
         }
     }
 }
@@ -3706,12 +3706,12 @@ static void render_shaft(ElevatorShaft *s)
                 grid_to_screen(index_to_floor(s->hi) + 1, s->x, &ex, &ey);
                 SDL_Rect src_top = { tail * tile_w, 0, tile_w, 36 };
                 SDL_Rect dst_top = { ex, ey, shaft_w, CELL_H };
-                SDL_RenderCopy(game.renderer, eng->texture, &src_top, &dst_top);
+                CT_RenderCopy(game.renderer, eng->texture, &src_top, &dst_top);
 
                 grid_to_screen(index_to_floor(s->lo) - 1, s->x, &ex, &ey);
                 SDL_Rect src_bot = { (tail + 1) * tile_w, 0, tile_w, 36 };
                 SDL_Rect dst_bot = { ex, ey, shaft_w, CELL_H };
-                SDL_RenderCopy(game.renderer, eng->texture, &src_bot, &dst_bot);
+                CT_RenderCopy(game.renderer, eng->texture, &src_bot, &dst_bot);
             }
         }
 
@@ -3783,19 +3783,19 @@ static void render_shaft(ElevatorShaft *s)
                         /* swap to the white clone — mod can only darken,
                          * so the black sheet itself can never redden */
                         if (w >= bar2)
-                            SDL_SetTextureColorMod(game.queue_hot,
+                            CT_SetTextureColorMod(game.queue_hot,
                                                    255, 25, 25);
                         else
-                            SDL_SetTextureColorMod(game.queue_hot,
+                            CT_SetTextureColorMod(game.queue_hot,
                                                    255, 127, 127);
-                        SDL_RenderCopy(game.renderer, game.queue_hot,
+                        CT_RenderCopy(game.renderer, game.queue_hot,
                                        &src, &dst);
                         continue;
                     }
                 }
-                SDL_RenderCopy(game.renderer, queue_spr->texture, &src, &dst);
+                CT_RenderCopy(game.renderer, queue_spr->texture, &src, &dst);
             }
-            SDL_SetTextureColorMod(queue_spr->texture, 255, 255, 255);
+            CT_SetTextureColorMod(queue_spr->texture, 255, 255, 255);
         }
 
         /* Cars, with smooth travel between floors. The sim ticks at 15Hz
@@ -3888,7 +3888,7 @@ static void render_shaft(ElevatorShaft *s)
             }
             SDL_Rect dst = { sx, sy, shaft_w, CELL_H };
             if (spr) {
-                SDL_RenderCopy(game.renderer, spr->texture, &src, &dst);
+                CT_RenderCopy(game.renderer, spr->texture, &src, &dst);
             } else {
                 SDL_SetRenderDrawColor(game.renderer, 90, 90, 140, 255);
                 SDL_RenderFillRect(game.renderer, &dst);
@@ -3954,7 +3954,7 @@ static void render_people(void)
             int xoff = cells ? (int)((h >> 8) % (uint32_t)(cells + 1)) : 0;
             SDL_Rect src = { pose * 16, 0, 16, 24 };
             SDL_Rect dst = { sx + xoff * CELL_W, sy + CELL_H - 24, 16, 24 };
-            SDL_RenderCopy(game.renderer, maid->texture, &src, &dst);
+            CT_RenderCopy(game.renderer, maid->texture, &src, &dst);
         }
     }
 
@@ -4024,16 +4024,16 @@ static void render_elv_edit_mode(void)
             SDL_Rect src = { 0, 0, 32, shaftspr->h };
             if (tw == 48) {
                 SDL_Rect mid = { tx + 8, ty, 32, CELL_H };
-                SDL_RenderCopy(game.renderer, shaftspr->texture, &src, &mid);
+                CT_RenderCopy(game.renderer, shaftspr->texture, &src, &mid);
                 if (ext) {
                     SDL_Rect sl = { 0, 0, 8, ext->h }, dl = { tx, ty, 8, CELL_H };
                     SDL_Rect sr = { 8, 0, 8, ext->h }, dr = { tx + 40, ty, 8, CELL_H };
-                    SDL_RenderCopy(game.renderer, ext->texture, &sl, &dl);
-                    SDL_RenderCopy(game.renderer, ext->texture, &sr, &dr);
+                    CT_RenderCopy(game.renderer, ext->texture, &sl, &dl);
+                    CT_RenderCopy(game.renderer, ext->texture, &sr, &dr);
                 }
             } else {
                 SDL_Rect dst = { tx, ty, tw, CELL_H };
-                SDL_RenderCopy(game.renderer, shaftspr->texture, &src, &dst);
+                CT_RenderCopy(game.renderer, shaftspr->texture, &src, &dst);
             }
         }
         if (elv_structural_stop(sel, f)) {
@@ -4404,7 +4404,7 @@ static void draw_analog_clock(int cx, int cy, int r, int hour, int minute)
     if (face && face->texture) {
         SDL_Rect dst = { cx - face->w / 2, cy - face->h / 2,
                          face->w, face->h };
-        SDL_RenderCopy(game.renderer, face->texture, NULL, &dst);
+        CT_RenderCopy(game.renderer, face->texture, NULL, &dst);
     } else {
         /* Fallback: the old vector face */
         SDL_SetRenderDrawColor(game.renderer, 255, 255, 240, 255);
@@ -4514,10 +4514,10 @@ static void draw_win31_titlebar(int x, int y, int w, const char *title)
         SDL_Color white = {255, 255, 255, 255};
         SDL_Surface *ts = TTF_RenderText_Blended(game.font_small, title, white);
         if (ts) {
-            SDL_Texture *tt = SDL_CreateTextureFromSurface(game.renderer, ts);
+            CT_Texture *tt = CT_CreateTextureFromSurface(game.renderer, ts);
             SDL_Rect dst = { x + 4, y + 2, ts->w, ts->h };
-            SDL_RenderCopy(game.renderer, tt, NULL, &dst);
-            SDL_DestroyTexture(tt);
+            CT_RenderCopy(game.renderer, tt, NULL, &dst);
+            CT_DestroyTexture(tt);
             SDL_FreeSurface(ts);
         }
     }
@@ -4542,7 +4542,7 @@ static void render_info_window(void)
             if (tx + tw > wx + INFO_BAR_W) tw = wx + INFO_BAR_W - tx;
             SDL_Rect src = { 0, 0, tw, game.ui_timebar_h };
             SDL_Rect dst = { tx, wy, tw, INFO_BAR_H };
-            SDL_RenderCopy(game.renderer, game.ui_timebar, &src, &dst);
+            CT_RenderCopy(game.renderer, game.ui_timebar, &src, &dst);
         }
     } else {
         draw_win31_rect(wx, wy, INFO_BAR_W, INFO_BAR_H, 1);
@@ -4566,16 +4566,16 @@ static void render_info_window(void)
         Sprite *tl = sprites_find(&game.sprites, 0x8147);
         if (tl && tl->texture) {
             SDL_Rect dst = { star_x, wy + 2, tl->w, tl->h };
-            SDL_RenderCopy(game.renderer, tl->texture, NULL, &dst);
+            CT_RenderCopy(game.renderer, tl->texture, NULL, &dst);
         } else if (game.font_small) {
             SDL_Color gold = {220, 180, 0, 255};
             SDL_Surface *ts = TTF_RenderUTF8_Blended(game.font_small,
                                                      "T O W E R", gold);
             if (ts) {
-                SDL_Texture *tt = SDL_CreateTextureFromSurface(game.renderer, ts);
+                CT_Texture *tt = CT_CreateTextureFromSurface(game.renderer, ts);
                 SDL_Rect dst = { star_x, wy + 4, ts->w, ts->h };
-                SDL_RenderCopy(game.renderer, tt, NULL, &dst);
-                SDL_DestroyTexture(tt);
+                CT_RenderCopy(game.renderer, tt, NULL, &dst);
+                CT_DestroyTexture(tt);
                 SDL_FreeSurface(ts);
             }
         }
@@ -4586,7 +4586,7 @@ static void render_info_window(void)
             SDL_Rect src = { 0, 0, STAR_CELL_W, game.ui_star_h };
             SDL_Rect dst = { star_x + i * STAR_CELL_W, wy + 2,
                             STAR_CELL_W, game.ui_star_h };
-            SDL_RenderCopy(game.renderer, game.ui_star[filled], &src, &dst);
+            CT_RenderCopy(game.renderer, game.ui_star[filled], &src, &dst);
         }
     } else if (game.font_small) {
         /* Fallback: UTF-8 stars */
@@ -4603,10 +4603,10 @@ static void render_info_window(void)
         stars[pos] = '\0';
         SDL_Surface *ts = TTF_RenderUTF8_Blended(game.font_small, stars, gold);
         if (ts) {
-            SDL_Texture *tt = SDL_CreateTextureFromSurface(game.renderer, ts);
+            CT_Texture *tt = CT_CreateTextureFromSurface(game.renderer, ts);
             SDL_Rect dst = { star_x, wy + 3, ts->w, ts->h };
-            SDL_RenderCopy(game.renderer, tt, NULL, &dst);
-            SDL_DestroyTexture(tt);
+            CT_RenderCopy(game.renderer, tt, NULL, &dst);
+            CT_DestroyTexture(tt);
             SDL_FreeSurface(ts);
         }
     }
@@ -4633,10 +4633,10 @@ static void render_info_window(void)
                  wd, q, year, ysuf);
         SDL_Surface *ts = TTF_RenderText_Blended(finfo, date_buf, black);
         if (ts) {
-            SDL_Texture *tt = SDL_CreateTextureFromSurface(game.renderer, ts);
+            CT_Texture *tt = CT_CreateTextureFromSurface(game.renderer, ts);
             SDL_Rect dst = { wx + 160, wy + 3, ts->w, ts->h };
-            SDL_RenderCopy(game.renderer, tt, NULL, &dst);
-            SDL_DestroyTexture(tt);
+            CT_RenderCopy(game.renderer, tt, NULL, &dst);
+            CT_DestroyTexture(tt);
             SDL_FreeSurface(ts);
         }
     }
@@ -4648,12 +4648,12 @@ static void render_info_window(void)
         format_money(game.tower.money, money_buf, sizeof(money_buf));
         SDL_Surface *ts = TTF_RenderText_Blended(finfo, money_buf, black);
         if (ts) {
-            SDL_Texture *tt = SDL_CreateTextureFromSurface(game.renderer, ts);
+            CT_Texture *tt = CT_CreateTextureFromSurface(game.renderer, ts);
             /* The bg art's Fund box interior is y3..18 — baseline-align with
              * the baked-in "Fund" label, not the rml's top:2. */
             SDL_Rect dst = { wx + INFO_BAR_W - ts->w - 6, wy + 4, ts->w, ts->h };
-            SDL_RenderCopy(game.renderer, tt, NULL, &dst);
-            SDL_DestroyTexture(tt);
+            CT_RenderCopy(game.renderer, tt, NULL, &dst);
+            CT_DestroyTexture(tt);
             SDL_FreeSurface(ts);
         }
 
@@ -4662,11 +4662,11 @@ static void render_info_window(void)
         snprintf(pop_buf, sizeof(pop_buf), "%d", game.tower.population);
         ts = TTF_RenderText_Blended(finfo, pop_buf, black);
         if (ts) {
-            SDL_Texture *tt = SDL_CreateTextureFromSurface(game.renderer, ts);
+            CT_Texture *tt = CT_CreateTextureFromSurface(game.renderer, ts);
             /* Pop box interior is y21..36 in the bg art */
             SDL_Rect dst = { wx + INFO_BAR_W - ts->w - 6, wy + 21, ts->w, ts->h };
-            SDL_RenderCopy(game.renderer, tt, NULL, &dst);
-            SDL_DestroyTexture(tt);
+            CT_RenderCopy(game.renderer, tt, NULL, &dst);
+            CT_DestroyTexture(tt);
             SDL_FreeSurface(ts);
         }
     }
@@ -4677,14 +4677,14 @@ static void render_info_window(void)
         int idx = (event_msg_head - 1 + EVENT_MSG_COUNT) % EVENT_MSG_COUNT;
         SDL_Surface *ts = TTF_RenderText_Blended(game.font_small, event_messages[idx], dk);
         if (ts) {
-            SDL_Texture *tt = SDL_CreateTextureFromSurface(game.renderer, ts);
+            CT_Texture *tt = CT_CreateTextureFromSurface(game.renderer, ts);
             /* The bg art's sunken message groove interior is x41..301, y25..35 */
             int max_w = INFO_BAR_W - 42 - 130;
             int dw = ts->w > max_w ? max_w : ts->w;
             SDL_Rect src2 = { 0, 0, dw, ts->h };
             SDL_Rect dst = { wx + 43, wy + 24, dw, ts->h };
-            SDL_RenderCopy(game.renderer, tt, &src2, &dst);
-            SDL_DestroyTexture(tt);
+            CT_RenderCopy(game.renderer, tt, &src2, &dst);
+            CT_DestroyTexture(tt);
             SDL_FreeSurface(ts);
         }
     }
@@ -4736,7 +4736,7 @@ static void render_minimap(void)
         int sky_dst_h = map_h * sky_h / art_h;
         uint8_t tr, tg, tb, ta;
         game_sky_tint(&game.sim, &tr, &tg, &tb, &ta);
-        SDL_SetTextureColorMod(game.ui_map,
+        CT_SetTextureColorMod(game.ui_map,
                                255 - (int)ta * (255 - (int)tr) / 255,
                                255 - (int)ta * (255 - (int)tg) / 255,
                                255 - (int)ta * (255 - (int)tb) / 255);
@@ -4745,16 +4745,16 @@ static void render_minimap(void)
         int dw1 = map_w * w1 / art_w;
         SDL_Rect s1 = { shift, 0, w1, sky_h };
         SDL_Rect d1 = { map_x, map_y, dw1, sky_dst_h };
-        SDL_RenderCopy(game.renderer, game.ui_map, &s1, &d1);
+        CT_RenderCopy(game.renderer, game.ui_map, &s1, &d1);
         if (shift > 0) {
             SDL_Rect s2 = { 0, 0, shift, sky_h };
             SDL_Rect d2 = { map_x + dw1, map_y, map_w - dw1, sky_dst_h };
-            SDL_RenderCopy(game.renderer, game.ui_map, &s2, &d2);
+            CT_RenderCopy(game.renderer, game.ui_map, &s2, &d2);
         }
-        SDL_SetTextureColorMod(game.ui_map, 255, 255, 255);
+        CT_SetTextureColorMod(game.ui_map, 255, 255, 255);
         SDL_Rect gs = { 0, sky_h, art_w, art_h - sky_h };
         SDL_Rect gd = { map_x, map_y + sky_dst_h, map_w, map_h - sky_dst_h };
-        SDL_RenderCopy(game.renderer, game.ui_map, &gs, &gd);
+        CT_RenderCopy(game.renderer, game.ui_map, &gs, &gd);
     } else {
         /* Fallback: sky gradient + earth */
         uint8_t tr, tg, tb, ta;
@@ -4945,7 +4945,7 @@ static void render_minimap(void)
             int lw = lg->w * map_w / 200;       /* legends drawn for a 200px map */
             int lh = lg->h;
             SDL_Rect dst = { map_x, map_y + map_h - lh, lw, lh };
-            SDL_RenderCopy(game.renderer, lg->texture, NULL, &dst);
+            CT_RenderCopy(game.renderer, lg->texture, NULL, &dst);
         }
     }
 
@@ -4961,12 +4961,12 @@ static void render_minimap(void)
             /* 1:1 blit — map_w == art width, MAP_TAB_H == art height;
              * scaling this strip mangles the tab text. */
             SDL_Rect dst = { map_x, by0, map_w, MAP_TAB_H };
-            SDL_RenderCopy(game.renderer, tabs->texture, NULL, &dst);
+            CT_RenderCopy(game.renderer, tabs->texture, NULL, &dst);
             if (tabsp && tabsp->texture && game.map_mode >= 0) {
                 SDL_Rect src = { game.map_mode * 50, 0, 50, MAP_TAB_H };
                 SDL_Rect pd  = { map_x + game.map_mode * map_w / 4, by0,
                                  map_w / 4, MAP_TAB_H };
-                SDL_RenderCopy(game.renderer, tabsp->texture, &src, &pd);
+                CT_RenderCopy(game.renderer, tabsp->texture, &src, &pd);
             }
             /* Port nicety (Jonah 2026-08-12): the star-gated Hotel tab is
              * dead until 2 stars — the EXE blits it looking live anyway.
@@ -5215,7 +5215,7 @@ static void draw_tool_icon(int bx, int by, int icon_idx, int selected)
         int off = selected ? 1 : 0;
         SDL_Rect src = { icon_idx * 32, selected ? 32 : 0, 32, 32 };
         SDL_Rect dst = { bx + off, by + off, TOOL_BTN_SIZE, TOOL_BTN_SIZE };
-        SDL_RenderCopy(game.renderer, game.ui_items, &src, &dst);
+        CT_RenderCopy(game.renderer, game.ui_items, &src, &dst);
     }
 }
 
@@ -5300,7 +5300,7 @@ static void render_toolbox(void)
             int icon_x = playing ? 64 : 0;        /* pause : play (64px cells) */
             SDL_Rect src = { icon_x, 0, 64, 32 };
             SDL_Rect dst = { sx, speed_y, bw, bh };
-            SDL_RenderCopy(game.renderer, game.ui_speed, &src, &dst);
+            CT_RenderCopy(game.renderer, game.ui_speed, &src, &dst);
         }
     }
     
@@ -5320,7 +5320,7 @@ static void render_toolbox(void)
             int row_y = pressed ? 21 : 0;
             SDL_Rect src = { t * 21, row_y, 21, 21 };
             SDL_Rect dst = { tx + t * 23, tools_y, 21, 21 };
-            SDL_RenderCopy(game.renderer, game.ui_tools, &src, &dst);
+            CT_RenderCopy(game.renderer, game.ui_tools, &src, &dst);
         }
     }
     
@@ -5354,11 +5354,11 @@ static void render_toolbox(void)
             SDL_Color black = {0, 0, 0, 255};
             SDL_Surface *ts = TTF_RenderText_Blended(game.font_small, tb->label, black);
             if (ts) {
-                SDL_Texture *tt = SDL_CreateTextureFromSurface(game.renderer, ts);
+                CT_Texture *tt = CT_CreateTextureFromSurface(game.renderer, ts);
                 SDL_Rect dst = { bx + TOOL_BTN_SIZE/2 - ts->w/2,
                                  by + TOOL_BTN_SIZE/2 - ts->h/2, ts->w, ts->h };
-                SDL_RenderCopy(game.renderer, tt, NULL, &dst);
-                SDL_DestroyTexture(tt);
+                CT_RenderCopy(game.renderer, tt, NULL, &dst);
+                CT_DestroyTexture(tt);
                 SDL_FreeSurface(ts);
             }
         }
@@ -5385,13 +5385,13 @@ static void render_toolbox(void)
             SDL_Surface *ts = TTF_RenderText_Blended(game.font_small,
                                                      lines[li], black);
             if (!ts) continue;
-            SDL_Texture *tt = SDL_CreateTextureFromSurface(game.renderer, ts);
+            CT_Texture *tt = CT_CreateTextureFromSurface(game.renderer, ts);
             int dw = ts->w > TOOL_WIN_W - 8 ? TOOL_WIN_W - 8 : ts->w;
             SDL_Rect src2 = { 0, 0, dw, ts->h };
             SDL_Rect dst = { wx + (TOOL_WIN_W - dw) / 2, label_y, dw, ts->h };
-            SDL_RenderCopy(game.renderer, tt, &src2, &dst);
+            CT_RenderCopy(game.renderer, tt, &src2, &dst);
             label_y += ts->h + 1;
-            SDL_DestroyTexture(tt);
+            CT_DestroyTexture(tt);
             SDL_FreeSurface(ts);
         }
     }
@@ -5433,11 +5433,11 @@ static int draw_menu_text(const char *text, int x, int y, int state)
     else                 { color = (SDL_Color){WIN31_TEXT, 255}; }
     SDL_Surface *surf = TTF_RenderUTF8_Blended(game.font_small, text, color);
     if (!surf) return 0;
-    SDL_Texture *tex = SDL_CreateTextureFromSurface(game.renderer, surf);
+    CT_Texture *tex = CT_CreateTextureFromSurface(game.renderer, surf);
     SDL_Rect dst = { x, y, surf->w, surf->h };
-    SDL_RenderCopy(game.renderer, tex, NULL, &dst);
+    CT_RenderCopy(game.renderer, tex, NULL, &dst);
     int w = surf->w;
-    SDL_DestroyTexture(tex);
+    CT_DestroyTexture(tex);
     SDL_FreeSurface(surf);
     return w;
 }
@@ -5638,7 +5638,7 @@ static void render_crane(void)
         int tx, ty;
         grid_to_screen(game.crane_floor + 1, game.crane_x, &tx, &ty);
         SDL_Rect crane_dst = { tx, ty, game.crane->w, game.crane->h };
-        SDL_RenderCopy(game.renderer, game.crane->texture, NULL, &crane_dst);
+        CT_RenderCopy(game.renderer, game.crane->texture, NULL, &crane_dst);
     }
 
     /* The wedding couple — AnimateWeddingCouple's script verbatim
@@ -5665,15 +5665,15 @@ static void render_crane(void)
             if (c < 14) {
                 SDL_Rect s0 = { 0, 0, fw, sheet->h };
                 SDL_Rect d0 = { tx + c * CELL_W, by, fw, sheet->h };
-                SDL_RenderCopy(game.renderer, sheet->texture, &s0, &d0);
+                CT_RenderCopy(game.renderer, sheet->texture, &s0, &d0);
                 SDL_Rect s1 = { fw, 0, fw, sheet->h };
                 SDL_Rect d1 = { tx + (27 - c) * CELL_W, by, fw, sheet->h };
-                SDL_RenderCopy(game.renderer, sheet->texture, &s1, &d1);
+                CT_RenderCopy(game.renderer, sheet->texture, &s1, &d1);
             } else {
                 int f = c < 19 ? c - 12 : 7;   /* 2..6, then the held pose */
                 SDL_Rect s = { f * fw, 0, fw, sheet->h };
                 SDL_Rect d = { tx + 13 * CELL_W, by, fw, sheet->h };
-                SDL_RenderCopy(game.renderer, sheet->texture, &s, &d);
+                CT_RenderCopy(game.renderer, sheet->texture, &s, &d);
             }
         }
     }
@@ -5707,7 +5707,7 @@ static void render_guard_fleet(int lobby_sx, int lobby_sy)
                 int frame = action ? 4 : ((g->x & 1) ? 2 : 0);
                 SDL_Rect src = { 80 + frame * 8, 0, 2 * CELL_W, CELL_H };
                 SDL_Rect dst = { gx, gy, 2 * CELL_W, CELL_H };
-                SDL_RenderCopy(game.renderer, ges->texture, &src, &dst);
+                CT_RenderCopy(game.renderer, ges->texture, &src, &dst);
             } else {   /* fallback: the old placeholder figure */
                 SDL_SetRenderDrawColor(game.renderer, 20, 20, 120, 255);
                 SDL_Rect body = { gx + 2, gy + CELL_H - 12, 4, 10 };
@@ -5764,7 +5764,7 @@ static void render_events(void)
                 if (flame && flame->texture) {
                     SDL_Rect dst = { fx, fy + CELL_H - flame->h,
                                      flame->w, flame->h };
-                    SDL_RenderCopy(game.renderer, flame->texture, NULL, &dst);
+                    CT_RenderCopy(game.renderer, flame->texture, NULL, &dst);
                 } else {
                     int flicker = (game.sim.frame % 6 < 3) ? 200 : 255;
                     SDL_SetRenderDrawColor(game.renderer, flicker, flicker/4, 0, 120);
@@ -5784,7 +5784,7 @@ static void render_events(void)
             int hy = floor_y - 2 * CELL_H + bob;
             if (heli && heli->texture) {
                 SDL_Rect hd = { hx, hy - heli->h, heli->w, heli->h };
-                SDL_RenderCopy(game.renderer, heli->texture, NULL, &hd);
+                CT_RenderCopy(game.renderer, heli->texture, NULL, &hd);
                 /* water streaming down onto the floors below */
                 SDL_SetRenderDrawBlendMode(game.renderer, SDL_BLENDMODE_BLEND);
                 SDL_SetRenderDrawColor(game.renderer, 90, 160, 230, 200);
@@ -5862,11 +5862,11 @@ static void draw_modal_button(SDL_Rect r, const char *label)
     draw_win31_rect(r.x, r.y, r.w, r.h, hot ? 0 : 1);
     SDL_Color fg = { 0, 0, 0, 255 };
     int tw, th;
-    SDL_Texture *t = render_text(label, fg, &tw, &th);
+    CT_Texture *t = render_text(label, fg, &tw, &th);
     if (t) {
         SDL_Rect d = { r.x + (r.w - tw) / 2, r.y + (r.h - th) / 2, tw, th };
-        SDL_RenderCopy(game.renderer, t, NULL, &d);
-        SDL_DestroyTexture(t);
+        CT_RenderCopy(game.renderer, t, NULL, &d);
+        CT_DestroyTexture(t);
     }
 }
 
@@ -5893,7 +5893,7 @@ static void render_disaster_modal(void)
     int text_x = wx + 16;
     if (icon && icon->texture) {
         SDL_Rect d = { wx + 14, body_y + 14, icon->w, icon->h };
-        SDL_RenderCopy(game.renderer, icon->texture, NULL, &d);
+        CT_RenderCopy(game.renderer, icon->texture, NULL, &d);
         text_x = wx + 14 + icon->w + 12;
     }
 
@@ -5919,7 +5919,7 @@ static void render_disaster_modal(void)
             int ox = wx + 14;
             if (heli_art && heli_art->texture) {
                 SDL_Rect hd = { wx + 14, ty + 2, heli_art->w, heli_art->h };
-                SDL_RenderCopy(game.renderer, heli_art->texture, NULL, &hd);
+                CT_RenderCopy(game.renderer, heli_art->texture, NULL, &hd);
                 ox = wx + 14 + heli_art->w + 10;
             }
             format_money(FIRE_CHOPPER_COST, num, sizeof num);
@@ -6100,7 +6100,7 @@ static void render_notice_modal(void)
     int tx = wx + 18;
     if (art && art->texture) {
         SDL_Rect ad = { wx + 14, wy + 16, art->w, art->h };
-        SDL_RenderCopy(game.renderer, art->texture, NULL, &ad);
+        CT_RenderCopy(game.renderer, art->texture, NULL, &ad);
         tx = wx + 14 + art->w + 12;
     }
     draw_text_wrapped(game.notice_text, tx, wy + 16,
@@ -6522,13 +6522,13 @@ static void render_event_alert(void)
     draw_win31_rect(px, py, panel_w, panel_h, 1);
     if (icon && icon->texture) {
         SDL_Rect d = { px + pad, py + (panel_h - ih) / 2, iw, ih };
-        SDL_RenderCopy(game.renderer, icon->texture, NULL, &d);
+        CT_RenderCopy(game.renderer, icon->texture, NULL, &d);
     }
     if (ts) {
-        SDL_Texture *tt = SDL_CreateTextureFromSurface(game.renderer, ts);
+        CT_Texture *tt = CT_CreateTextureFromSurface(game.renderer, ts);
         SDL_Rect d = { px + pad + iw + gap, py + (panel_h - th) / 2, tw, th };
-        SDL_RenderCopy(game.renderer, tt, NULL, &d);
-        SDL_DestroyTexture(tt);
+        CT_RenderCopy(game.renderer, tt, NULL, &d);
+        CT_DestroyTexture(tt);
         SDL_FreeSurface(ts);
     }
 }
@@ -7029,11 +7029,11 @@ static uint16_t stair_hit_test(int floor, int cell)
 /* ---- small drawing helpers ---- */
 static void draw_centered(SDL_Rect r, const char *s, SDL_Color c)
 {
-    int w = 0, h = 0; SDL_Texture *tex = render_text(s, c, &w, &h);
+    int w = 0, h = 0; CT_Texture *tex = render_text(s, c, &w, &h);
     if (!tex) return;
     SDL_Rect d = { r.x + (r.w - w) / 2, r.y + (r.h - h) / 2, w, h };
-    SDL_RenderCopy(game.renderer, tex, NULL, &d);
-    SDL_DestroyTexture(tex);
+    CT_RenderCopy(game.renderer, tex, NULL, &d);
+    CT_DestroyTexture(tex);
 }
 static void draw_bevel(SDL_Rect r, int raised)
 {
@@ -7120,11 +7120,11 @@ static void draw_field31_text(SDL_Rect r, const char *s, SDL_Color c)
     draw_field31(r);
     if (!s || !s[0]) return;
     int tw, th;
-    SDL_Texture *t = render_text(s, c, &tw, &th);
+    CT_Texture *t = render_text(s, c, &tw, &th);
     if (t) {
         SDL_Rect d = { r.x + 5, r.y + (r.h - th) / 2, tw, th };
-        SDL_RenderCopy(game.renderer, t, NULL, &d);
-        SDL_DestroyTexture(t);
+        CT_RenderCopy(game.renderer, t, NULL, &d);
+        CT_DestroyTexture(t);
     }
 }
 
@@ -7139,14 +7139,14 @@ static void draw_label31(SDL_Rect r, SDL_Rect field, const char *s, SDL_Color c)
     if (!f || !s || !s[0]) return;
     SDL_Surface *surf = TTF_RenderUTF8_Blended(f, s, c);
     if (!surf) return;
-    SDL_Texture *t = SDL_CreateTextureFromSurface(game.renderer, surf);
+    CT_Texture *t = CT_CreateTextureFromSurface(game.renderer, surf);
     int tw = surf->w, th = surf->h;
     SDL_FreeSurface(surf);
     if (!t) return;
     /* Same centering math as draw_field31_text, against the field row. */
     SDL_Rect d = { r.x + r.w - tw - 4, field.y + (field.h - th) / 2, tw, th };
-    SDL_RenderCopy(game.renderer, t, NULL, &d);
-    SDL_DestroyTexture(t);
+    CT_RenderCopy(game.renderer, t, NULL, &d);
+    CT_DestroyTexture(t);
 }
 
 /* Win3.1 push button: black border, double bevel, default ring. */
@@ -7227,20 +7227,20 @@ static void draw_tenant_picture(const Tenant *t, SDL_Rect box)
     int wx0 = t->x * CELL_W;
     int wy0 = -topf * CELL_H + 12;           /* skip the ceiling slab */
 
-    static SDL_Texture *tgt = NULL;
+    static CT_Texture *tgt = NULL;
     static int tgt_w = 0, tgt_h = 0;
     if (!tgt || tgt_w != game.screen_w || tgt_h != game.screen_h) {
-        if (tgt) SDL_DestroyTexture(tgt);
-        tgt = SDL_CreateTexture(game.renderer, SDL_PIXELFORMAT_ARGB8888,
+        if (tgt) CT_DestroyTexture(tgt);
+        tgt = CT_CreateTexture(game.renderer, SDL_PIXELFORMAT_ARGB8888,
                                 SDL_TEXTUREACCESS_TARGET,
                                 game.screen_w, game.screen_h);
         tgt_w = game.screen_w; tgt_h = game.screen_h;
 #if SDL_VERSION_ATLEAST(2, 0, 12)
-        if (tgt) SDL_SetTextureScaleMode(tgt, SDL_ScaleModeNearest);
+        if (tgt) CT_SetTextureScaleMode(tgt, SDL_ScaleModeNearest);
 #endif
     }
-    if (tgt) {
-        SDL_SetRenderTarget(game.renderer, tgt);
+    int target_ready = tgt && CT_SetRenderTarget(game.renderer, tgt) == 0;
+    if (target_ready) {
         float sx = game.cam_fx, sy = game.cam_fy;
         game.cam_fx = (float)(wx0 + game.screen_w / 2);
         game.cam_fy = (float)(wy0 + game.screen_h / 2);
@@ -7248,12 +7248,12 @@ static void draw_tenant_picture(const Tenant *t, SDL_Rect box)
         render_tower();
         render_people();
         game.cam_fx = sx; game.cam_fy = sy;
-        SDL_SetRenderTarget(game.renderer, NULL);
+        CT_SetRenderTarget(game.renderer, NULL);
     }
 
     SDL_SetRenderDrawColor(game.renderer, 204, 204, 204, 255);
     SDL_RenderFillRect(game.renderer, &box);
-    if (tgt && src_w > 0 && src_h > 0) {
+    if (target_ready && src_w > 0 && src_h > 0) {
         int rw = box.w * 100 / src_w, rh = box.h * 100 / src_h, scale;
         if (rw < 100 && rh < 100) {
             scale = rw > rh ? rw : rh;       /* cover: crop the overflow */
@@ -7267,7 +7267,7 @@ static void draw_tenant_picture(const Tenant *t, SDL_Rect box)
         SDL_Rect dst = { box.x + (box.w - dw) / 2,
                          box.y + (box.h - dh) / 2, dw, dh };
         SDL_RenderSetClipRect(game.renderer, &clip);
-        SDL_RenderCopy(game.renderer, tgt, &src, &dst);
+        CT_RenderCopy(game.renderer, tgt, &src, &dst);
         SDL_RenderSetClipRect(game.renderer, NULL);
     }
     SDL_SetRenderDrawColor(game.renderer, 90, 90, 90, 255);
@@ -7574,7 +7574,7 @@ static int draw_person_figure(uint16_t pid, int x, int y, int scale)
     /* wide frames shift left half a cell so they stay centered (372c) */
     SDL_Rect dst = { x - (frame >= 6 ? 4 * scale : 0), y,
                      fw * scale, 24 * scale };
-    SDL_RenderCopy(game.renderer, sheet->texture, &src, &dst);
+    CT_RenderCopy(game.renderer, sheet->texture, &src, &dst);
     return 1;
 }
 
@@ -7590,7 +7590,7 @@ static void draw_person_strip(const uint16_t *pids, int n, int x, int y)
             int fig = (pids[k] * 7) % 40;   /* legacy silhouette fallback */
             SDL_Rect src = { fig * 16, 0, 16, PSTRIP_H };
             SDL_Rect dst = { x + k * PSTRIP_PITCH, y, 16, PSTRIP_H };
-            SDL_RenderCopy(game.renderer, qs->texture, &src, &dst);
+            CT_RenderCopy(game.renderer, qs->texture, &src, &dst);
         } else {
             SDL_SetRenderDrawColor(game.renderer, 40, 40, 40, 255);
             SDL_Rect dst = { x + k * PSTRIP_PITCH, y + 8, 12, PSTRIP_H - 8 };
@@ -7660,7 +7660,7 @@ static void render_person_popup(void)
             int fig = (game.person_pid * 7) % 40;
             SDL_Rect src = { fig * 16, 0, 16, 36 };
             SDL_Rect dst = { tx, ty, 32, 72 };
-            SDL_RenderCopy(game.renderer, qs->texture, &src, &dst);
+            CT_RenderCopy(game.renderer, qs->texture, &src, &dst);
         }
     }
 
@@ -7916,9 +7916,9 @@ static void render_name_editor(void)
     draw_field31(e);
     int tw = 0, th = 0;
     if (game.name_edit_len > 0) {
-        SDL_Texture *tex = render_text(game.name_edit_buf, ink, &tw, &th);
+        CT_Texture *tex = render_text(game.name_edit_buf, ink, &tw, &th);
         if (tex) { SDL_Rect td = { e.x + 5, e.y + 4, tw, th };
-                   SDL_RenderCopy(game.renderer, tex, NULL, &td); SDL_DestroyTexture(tex); }
+                   CT_RenderCopy(game.renderer, tex, NULL, &td); CT_DestroyTexture(tex); }
     }
     SDL_SetRenderDrawColor(game.renderer, 0, 0, 0, 255);
     int cx = e.x + 5 + tw + 1;
@@ -8269,6 +8269,13 @@ static void find_dialog_click(int mx, int my, int clicks)
 
 static void render(void)
 {
+#ifdef __vita__
+    static int first_frame = 1;
+    if (first_frame) {
+        vita_boot_watch_stage("first gameplay sky/world drawing");
+        CT_BOOT("first gameplay frame draw begin");
+    }
+#endif
     /* Cursor follows the active tool: crosshair while bulldozing, else arrow. */
     SDL_Cursor *want = game.demolish_mode ? game.cursor_demolish : game.cursor_arrow;
     if (want && SDL_GetCursor() != want) SDL_SetCursor(want);
@@ -8294,7 +8301,7 @@ static void render(void)
             if (arw && arw->texture) {
                 SDL_Rect ad = { ax - arw->w / 2 + CELL_W / 2,
                                 ay - CELL_H - arw->h + bob, arw->w, arw->h };
-                SDL_RenderCopy(game.renderer, arw->texture, NULL, &ad);
+                CT_RenderCopy(game.renderer, arw->texture, NULL, &ad);
             } else {
                 SDL_SetRenderDrawColor(game.renderer, 220, 0, 0, 255);
                 SDL_Rect tip = { ax + CELL_W / 2 - 2, ay - CELL_H + bob, 4, 12 };
@@ -8305,6 +8312,12 @@ static void render(void)
         render_crane();
         render_build_ghost();
     }
+#ifdef __vita__
+    if (first_frame) {
+        CT_BOOT("first gameplay world draw complete; UI begins");
+        vita_boot_watch_stage("first gameplay UI drawing");
+    }
+#endif
     render_ui();
     render_stats_window();
     render_tuning_window();
@@ -8325,7 +8338,6 @@ static void render(void)
     render_quit_confirm();     /* topmost — quitting outranks all */
 
 #ifdef __vita__
-    static int first_frame = 1;
     if (first_frame) {
         vita_boot_watch_stage("first gameplay frame presentation");
         CT_BOOT("first gameplay frame submit begin");
@@ -10180,13 +10192,13 @@ int main(int argc, char *argv[])
     vita_boot_notice_end();
 #endif
 #ifdef __vita__
-    vita_boot_watch_stage("SDL_Init video/audio/controller");
+    vita_boot_watch_stage("SDL_Init video/controller (audio optional later)");
     SDL_ClearError();
 #endif
-    CT_BOOT("SDL_Init begin (video/audio/controller)");
+    CT_BOOT("SDL_Init begin (video/controller; optional audio initialized separately)");
     /* Initialize SDL */
 #ifdef __vita__
-    if (SDL_Init(SDL_INIT_VIDEO | SDL_INIT_AUDIO |
+    if (SDL_Init(SDL_INIT_VIDEO |
                  SDL_INIT_JOYSTICK | SDL_INIT_GAMECONTROLLER) != 0) {
 #else
     if (SDL_Init(SDL_INIT_VIDEO | SDL_INIT_AUDIO) != 0) {
@@ -10224,7 +10236,7 @@ int main(int argc, char *argv[])
     SDL_ClearError();
 #endif
     CT_BOOT("SDL_CreateWindow (native) begin: %dx%d flags=0x%x", WINDOW_W, WINDOW_H, (unsigned)wflags);
-    game.window = SDL_CreateWindow("ConciliaTower",
+    game.window = SDL_CreateWindow("Concilia Tower",
         SDL_WINDOWPOS_CENTERED, SDL_WINDOWPOS_CENTERED,
         WINDOW_W, WINDOW_H, wflags);
     if (!game.window) return CT_FAIL("SDL_CreateWindow failed.");
@@ -10304,15 +10316,25 @@ int main(int argc, char *argv[])
     vita_boot_watch_stage("audio initialization / decode");
     SDL_ClearError();
 #endif
+#ifdef __vita__
+    /* The mixer uses 16 KiB of scratch on its callback stack, plus SDL's
+     * resampler. Give SDL-created threads headroom above Vita's small defaults. */
+    SDL_SetHintWithPriority(SDL_HINT_THREAD_STACK_SIZE, "131072", SDL_HINT_OVERRIDE);
+    CT_BOOT("SDL worker thread stack requested: 128 KiB; audio failure is nonfatal");
+#endif
     CT_BOOT("audio device and asset decode begin");
     g_sound_capture = getenv("CT_SOUND_CAPTURE") != NULL;
     if (g_sound_capture ? (audio_init_capture() == 0) : (audio_init() == 0)) {
+        CT_BOOT("Audio device opened; decoding WAV resources");
         int nclips = audio_load_from_ne(&game.exe);
+        CT_BOOT("Audio decode complete: clips=%d", nclips);
         printf("Audio: %d sound effects loaded%s\n", nclips,
                g_sound_capture ? " (capture mode)" : "");
         g_sound_hook = sound_shim;
         if (g_sound_capture) audio_capture_begin();
         play_snd(SND_STARTUP);          /* intro jingle (referee row 23) */
+    } else {
+        CT_BOOT("Audio unavailable; continuing silently: %s", SDL_GetError());
     }
 
     CT_BOOT("audio stage done; composite sprite processing begin");
@@ -10490,7 +10512,7 @@ int main(int argc, char *argv[])
                 Sprite *old = sprites_find(&game.sprites, SPR_MEDICAL_COMP);
                 Sprite *nw  = sprites_find(&game.sprites, temp_id);
                 if (old && nw) {
-                    SDL_DestroyTexture(old->texture);
+                    CT_DestroyTexture(old->texture);
                     SDL_FreeSurface(old->pixels);
                     old->pixels = nw->pixels;
                     nw->pixels = NULL;
@@ -10583,10 +10605,9 @@ int main(int argc, char *argv[])
             Sprite *cs = sprites_find(&game.sprites, cloud_ids[i]);
             if (cs) {
                 if (sprites_replace_surface(cs, game.renderer, surf) != 0) {
-                    SDL_FreeSurface(surf);
-                    return CT_FAIL("Sprite surface replacement failed.");
+                    CT_BOOT("Optional sprite replacement failed; keeping previous asset: %s", SDL_GetError());
                 }
-                SDL_SetTextureBlendMode(cs->texture, SDL_BLENDMODE_BLEND);
+                CT_SetTextureBlendMode(cs->texture, SDL_BLENDMODE_BLEND);
                 game.clouds[i] = cs;
                 game.cloud_count++;
                 printf("Cloud %d (0x%04x): %dx%d (white→transparent)\n",
@@ -10617,10 +10638,9 @@ int main(int argc, char *argv[])
                 Sprite *ss = sprites_find(&game.sprites, SPR_SANTA);
                 if (ss) {
                     if (sprites_replace_surface(ss, game.renderer, surf) != 0) {
-                        SDL_FreeSurface(surf);
-                        return CT_FAIL("Sprite surface replacement failed.");
+                        CT_BOOT("Optional sprite replacement failed; keeping previous asset: %s", SDL_GetError());
                     }
-                    SDL_SetTextureBlendMode(ss->texture, SDL_BLENDMODE_BLEND);
+                    CT_SetTextureBlendMode(ss->texture, SDL_BLENDMODE_BLEND);
                     game.santa = ss;
                     printf("🎅 Santa sprite loaded: %dx%d\n", ss->w, ss->h);
                 }
@@ -10662,10 +10682,9 @@ int main(int argc, char *argv[])
                     Sprite *sp = sprites_find(&game.sprites, decos[d].id);
                     if (sp) {
                         if (sprites_replace_surface(sp, game.renderer, surf) != 0) {
-                            SDL_FreeSurface(surf);
-                            return CT_FAIL("Sprite surface replacement failed.");
+                            CT_BOOT("Optional sprite replacement failed; keeping previous asset: %s", SDL_GetError());
                         }
-                        SDL_SetTextureBlendMode(sp->texture, SDL_BLENDMODE_BLEND);
+                        CT_SetTextureBlendMode(sp->texture, SDL_BLENDMODE_BLEND);
                         *decos[d].target = sp;
                         printf("🎨 %s loaded: %dx%d (0x%04X)\n", decos[d].name, sp->w, sp->h, decos[d].id);
                     }
@@ -10688,10 +10707,9 @@ int main(int argc, char *argv[])
                 Sprite *sp = sprites_find(&game.sprites, SPR_SKYLINE);
                 if (sp) {
                     if (sprites_replace_surface(sp, game.renderer, surf) != 0) {
-                        SDL_FreeSurface(surf);
-                        return CT_FAIL("Sprite surface replacement failed.");
+                        CT_BOOT("Optional sprite replacement failed; keeping previous asset: %s", SDL_GetError());
                     }
-                    SDL_SetTextureBlendMode(sp->texture, SDL_BLENDMODE_BLEND);
+                    CT_SetTextureBlendMode(sp->texture, SDL_BLENDMODE_BLEND);
                     game.skyline = sp;
                     printf("🎨 City skyline loaded: %dx%d (sky-blue transparent)\n", sp->w, sp->h);
                 }
@@ -10720,9 +10738,9 @@ int main(int argc, char *argv[])
                     if (px[i] & 0x000000FF)          /* opaque -> white */
                         px[i] |= 0xFFFFFF00;
                 game.queue_hot =
-                    SDL_CreateTextureFromSurface(game.renderer, rgba);
+                    CT_CreateTextureFromSurface(game.renderer, rgba);
                 if (game.queue_hot)
-                    SDL_SetTextureBlendMode(game.queue_hot,
+                    CT_SetTextureBlendMode(game.queue_hot,
                                             SDL_BLENDMODE_BLEND);
                 SDL_FreeSurface(rgba);
             }
@@ -10785,10 +10803,10 @@ int main(int argc, char *argv[])
             /* Make gray background transparent (0x999999) */
             SDL_SetColorKey(items_surf, SDL_TRUE, SDL_MapRGB(items_surf->format, 0x99, 0x99, 0x99));
             
-            game.ui_items = SDL_CreateTextureFromSurface(game.renderer, items_surf);
+            game.ui_items = CT_CreateTextureFromSurface(game.renderer, items_surf);
             game.ui_items_w = items_surf->w;
             game.ui_items_h = items_surf->h;
-            SDL_SetTextureBlendMode(game.ui_items, SDL_BLENDMODE_BLEND);
+            CT_SetTextureBlendMode(game.ui_items, SDL_BLENDMODE_BLEND);
             SDL_FreeSurface(items_surf);
             printf("🎨 Toolbox item icons loaded: %dx%d (26 icons)\n", 
                    game.ui_items_w, game.ui_items_h);
@@ -10800,7 +10818,7 @@ int main(int argc, char *argv[])
             if (res) {
                 SDL_Surface *surf = sprites_dib_to_surface(&game.sprites, res);
                 if (surf) {
-                    game.ui_timebar = SDL_CreateTextureFromSurface(game.renderer, surf);
+                    game.ui_timebar = CT_CreateTextureFromSurface(game.renderer, surf);
                     game.ui_timebar_w = surf->w;
                     game.ui_timebar_h = surf->h;
                     SDL_FreeSurface(surf);
@@ -10820,9 +10838,9 @@ int main(int argc, char *argv[])
                 if (surf) {
                     /* Make gray (0x999999) transparent */
                     SDL_SetColorKey(surf, SDL_TRUE, SDL_MapRGB(surf->format, 0x99, 0x99, 0x99));
-                    game.ui_star[si] = SDL_CreateTextureFromSurface(game.renderer, surf);
+                    game.ui_star[si] = CT_CreateTextureFromSurface(game.renderer, surf);
                     if (si == 0) { game.ui_star_w = surf->w; game.ui_star_h = surf->h; }
-                    SDL_SetTextureBlendMode(game.ui_star[si], SDL_BLENDMODE_BLEND);
+                    CT_SetTextureBlendMode(game.ui_star[si], SDL_BLENDMODE_BLEND);
                     SDL_FreeSurface(surf);
                     printf("🎨 Star %s loaded: %dx%d\n", si ? "filled" : "empty",
                            game.ui_star_w, game.ui_star_h);
@@ -10853,7 +10871,7 @@ int main(int argc, char *argv[])
                     SDL_BlitSurface(bmp, NULL, speed_surf, &dst);
                     SDL_FreeSurface(bmp);
                 }
-                game.ui_speed = SDL_CreateTextureFromSurface(game.renderer, speed_surf);
+                game.ui_speed = CT_CreateTextureFromSurface(game.renderer, speed_surf);
                 game.ui_speed_w = speed_surf->w;
                 game.ui_speed_h = speed_surf->h;
                 SDL_FreeSurface(speed_surf);
@@ -10877,7 +10895,7 @@ int main(int argc, char *argv[])
                     SDL_BlitSurface(bmp, NULL, tools_surf, &dst);
                     SDL_FreeSurface(bmp);
                 }
-                game.ui_tools = SDL_CreateTextureFromSurface(game.renderer, tools_surf);
+                game.ui_tools = CT_CreateTextureFromSurface(game.renderer, tools_surf);
                 game.ui_tools_w = tools_surf->w;
                 game.ui_tools_h = tools_surf->h;
                 SDL_FreeSurface(tools_surf);
@@ -10891,7 +10909,7 @@ int main(int argc, char *argv[])
             if (res) {
                 SDL_Surface *surf = sprites_dib_to_surface(&game.sprites, res);
                 if (surf) {
-                    game.ui_map = SDL_CreateTextureFromSurface(game.renderer, surf);
+                    game.ui_map = CT_CreateTextureFromSurface(game.renderer, surf);
                     game.ui_map_w = surf->w;
                     game.ui_map_h = surf->h;
                     SDL_FreeSurface(surf);
@@ -10940,6 +10958,10 @@ int main(int argc, char *argv[])
         printf("===========================\n\n");
     }
     
+    CT_BOOT("Composite/UI texture preparation done");
+#ifdef __vita__
+    vita_boot_watch_stage("tower and simulation initialization");
+#endif
     /* Initialize tower and simulation */
     CT_BOOT("tower/simulation init begin");
     tower_init(&game.tower);
@@ -11968,11 +11990,14 @@ int main(int argc, char *argv[])
     
     CT_BOOT("normal shutdown begin");
     /* Cleanup */
+    audio_shutdown();
     sprites_free(&game.sprites);
     if (game.font) TTF_CloseFont(game.font);
     if (game.font_small) TTF_CloseFont(game.font_small);
     if (game.font_info) TTF_CloseFont(game.font_info);
+    if (game.font_dlg) TTF_CloseFont(game.font_dlg);
     TTF_Quit();
+    CT_DestroyTextures(game.renderer);
     SDL_DestroyRenderer(game.renderer);
     SDL_DestroyWindow(game.window);
     SDL_Quit();
