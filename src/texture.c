@@ -12,7 +12,7 @@
 typedef struct { SDL_Texture *gpu; SDL_Rect rect; } Tile;
 struct CT_Texture {
     SDL_Renderer *renderer;
-    int w, h, count, access;
+    int w, h, count, access, refs;
     Tile *tiles;
     SDL_Surface *pixels; /* Only oversized textures retain a CPU resampling source. */
     struct CT_Texture *scaled; /* Detached, owned cache for fractional cross-tile draws. */
@@ -24,6 +24,9 @@ struct CT_Texture {
     struct CT_Texture *next;
 };
 static CT_Texture *textures;
+static CT_TextureStats texture_stats;
+CT_TextureStats CT_TextureStatsReset(void) { CT_TextureStats s=texture_stats; memset(&texture_stats,0,sizeof(texture_stats)); return s; }
+CT_Texture *CT_RetainTexture(CT_Texture *t) { if(t) t->refs++; return t; }
 static int test_width, test_height, fail_next_upload;
 void CT_TextureTestLimit(int w, int h) { test_width = w; test_height = h; }
 void CT_TextureTestFailNextUpload(void) { fail_next_upload = 1; }
@@ -53,6 +56,7 @@ static CT_Texture *allocate(SDL_Renderer *r, int w, int h, int access)
     if (!r || w <= 0 || h <= 0) { SDL_SetError("Invalid logical texture size"); return NULL; }
     CT_Texture *t = calloc(1, sizeof(*t));
     if (!t) { SDL_OutOfMemory(); return NULL; }
+    t->refs=1;
     t->renderer = r; t->w = w; t->h = h; t->access = access;
     t->red = t->green = t->blue = t->alpha = 255;
     t->blend = SDL_BLENDMODE_NONE;
@@ -136,6 +140,7 @@ CT_Texture *CT_CreateTextureFromSurface(SDL_Renderer *r, SDL_Surface *s)
         SDL_SetSurfaceAlphaMod(t->pixels, 255);
         SDL_SetSurfaceBlendMode(t->pixels, SDL_BLENDMODE_NONE);
     }
+    texture_stats.uploads += t->count;
     SDL_GetTextureScaleMode(t->tiles[0].gpu, &t->scale);
     SDL_GetTextureBlendMode(t->tiles[0].gpu, &t->blend);
     SDL_GetTextureColorMod(t->tiles[0].gpu, &t->red, &t->green, &t->blue);
@@ -171,7 +176,7 @@ CT_Texture *CT_CreateTexture(SDL_Renderer *r, Uint32 format, int access, int w, 
 
 void CT_DestroyTexture(CT_Texture *t)
 {
-    if (!t) return;
+    if (!t || --t->refs > 0) return;
     CT_Texture **p = &textures;
     while (*p && *p != t) p = &(*p)->next;
     if (*p) *p = t->next;
@@ -182,7 +187,7 @@ void CT_DestroyTexture(CT_Texture *t)
 void CT_DestroyTextures(SDL_Renderer *r)
 {
     CT_Texture *t = textures;
-    while (t) { CT_Texture *next = t->next; if (t->renderer == r) CT_DestroyTexture(t); t = next; }
+    while (t) { CT_Texture *next = t->next; if (t->renderer == r) { t->refs=1; CT_DestroyTexture(t); } t = next; }
 }
 
 int CT_RenderCopy(SDL_Renderer *r, CT_Texture *t, const SDL_Rect *source, const SDL_Rect *dest)
@@ -225,6 +230,7 @@ int CT_RenderCopy(SDL_Renderer *r, CT_Texture *t, const SDL_Rect *source, const 
     if (t->pixels && (dst.w % src.w || dst.h % src.h)) {
         if (!t->scaled || memcmp(&t->cached_source, &src, sizeof(src)) ||
             t->cached_w != dst.w || t->cached_h != dst.h) {
+            texture_stats.scaled_cache_misses++;
             CT_DestroyTexture(t->scaled); t->scaled = NULL;
             int mw, mh; limits(r, &mw, &mh);
             int crop_fits = src.w <= mw && src.h <= mh;
@@ -263,6 +269,7 @@ int CT_RenderCopy(SDL_Renderer *r, CT_Texture *t, const SDL_Rect *source, const 
         double y1 = dst.y + (double)(piece.y + piece.h - src.y) * dst.h / src.h;
         SDL_FRect out = {(float)x0, (float)y0, (float)(x1-x0), (float)(y1-y0)};
         piece.x -= tile->rect.x; piece.y -= tile->rect.y;
+        texture_stats.tile_draws++;
         if (SDL_RenderCopyF(r, tile->gpu, &piece, &out) < 0) return -1;
     }
     return 0;

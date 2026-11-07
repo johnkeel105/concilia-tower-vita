@@ -304,3 +304,83 @@ only (no title/subtitle overlay), while the centered launch-gate text remains.
 All three PNGs stay 8-bit indexed. Release: `ConciliaTower-v0.6.vpk`.
 Cross-build/package/host tests pass; real-Vita gameplay validation is still
 needed. If it stops later, send `ux0:data/concilia-tower/boot.log` again.
+
+
+## v0.7: usable Vita pointer/touch and a 60 Hz render target (APP_VER 00.07)
+
+v0.6 reached gameplay on hardware. Its controls had both analog sticks wired to
+camera movement, Cross/Circle to Return/Escape, Start to pause, and relied on a
+system cursor/touch-generated mouse that the native backend did not provide.
+
+Controls (latest requested mapping):
+- **Left stick**: camera scroll, elapsed-time based, with deadzone.
+- **Right stick**: visible virtual mouse, deadzone and accelerated response.
+- **D-pad**: 2-pixel fine cursor nudge, then slow repeat while held.
+- **Cross**: left button down/up; hold with cursor movement for dragging.
+- **Circle**: right button down/up (the game's right-drag camera behavior).
+- **Start**: open/close the File menu, not pause. L/R change simulation speed,
+  Triangle saves, Select toggles debug labels as before.
+- **Front touch**: tap/click or drag, moving the same visible cursor. One primary
+  finger owns a gesture; rear/multiple extra contacts do not create clicks.
+
+The pointer is a one-time-uploaded outlined arrow, drawn above every game/modal
+layer rather than an unsupported system cursor. It starts visible, clamps to
+0..959 / 0..543, and shares the fixed 960x544 SDL logical render space. Mouse
+coordinates/grid hit tests refresh before modal/button handling and after camera
+movement; stationary-pointer clicks after left-stick scrolling no longer use a
+stale world cell. Focus loss cancels pressed buttons/drags. Touch plus Cross
+aggregate one left-button state so either cannot prematurely release the other.
+Tap/click sequences also provide double-click counts.
+
+Installed SDL backend inspection (`SDL_vitatouch.c.obj`) confirms front device
+ID 1, rear ID 2, normalized finger coordinates, environment gates
+VITA_DISABLE_TOUCH_FRONT/BACK, and a private Vita_Window poll guard. v0.7 enables
+front sampling, disables rear polling, disables SDL's touch-to-mouse and
+mouse-to-touch synthesis, and translates front FINGER events explicitly. It
+ignores SDL_TOUCH_MOUSEID only to suppress duplicate synthetic clicks. If a real
+front contact is visible through sceTouchPeek but produces no SDL finger event,
+SDK front polling becomes the single authoritative touch source for that run;
+its panel active area is normalized through exactly the same event core.
+The selected source and first touch are logged.
+
+Performance findings/fixes (target is 60 fps; not yet hardware measured):
+- Removed the unconditional 16 ms sleep **after** vsynced presentation, which
+  could turn a 60 Hz native renderer into roughly 30 fps. Only a remaining
+  frame-budget delay is added when presentation/work consumed less than 1/60 s.
+- Previously every text label was rasterized, uploaded and destroyed each frame.
+  Destroying those GPU textures also breaks batching/flushes queued draws. A
+  bounded 256-entry / 4 MiB CPU text cache (roughly matching GPU texel budget)
+  now retains both immutable rasters and GPU textures. All text paths use it;
+  unchanged labels have zero repeat rasterizations/uploads. Caller surface and
+  texture ownership is preserved by references; LRU eviction is safe even with
+  a retained surface/texture. Changed strings rasterize only on cache miss.
+- Replaced up to 544 sky scanline/color commands each frame with one cached
+  gradient-texture draw. Two 1x256 textures cover clear and overcast sky.
+- Explicitly enable SDL render batching. Sprite keys/composites were already
+  startup-only/cached; ordinary tiled frames use a single tile, while uncommon
+  cross-tile scaled crops stay cached. There is no CPU full-frame compositor to
+  dirty-redraw: native GXM redraws the GPU scene and culls offscreen floors.
+- Simulation uses elapsed time, independent of render FPS: normal/paused
+  maintenance 15 Hz, fast 60 Hz, turbo 180 Hz, with bounded catch-up to avoid a
+  spiral after suspend/slow frames. Desktop/web pacing remains unchanged.
+- Preserve startup clocks ARM 444 / bus 222 / GPU 222 / xbar 166 MHz, now logging
+  actual readbacks as well as setter status.
+
+Every ~5 seconds boot.log gets a PERF line: avg_fps, min_fps (slowest frame's
+reciprocal), worst_frame_ms, simulation/input work, render CPU time, presentation
+wait, actual texture uploads, tiled pieces, scaled-cache misses and text
+hits/misses. The first window includes startup texture uploads/warmup; later
+idle windows should show cache hits and few or zero uploads. Send at least two
+PERF lines, plus whether touch and both stick roles now work. Logging itself is
+infrequent but synced, so storage stalls may appear in worst-frame timing.
+
+ASan/UBSan tests added: `test_vita_input.c` covers both stick roles, deadzone,
+clamp, Cross drag, Circle, D-pad, Start, normalized front touch, rear rejection,
+synthetic duplicate suppression, combined left-button ownership, focus release,
+cursor drawing, and identical 15/60 Hz sim counts at 30/60/120 render fps.
+`test_text_cache.c` uses a deterministic mock rasterizer to verify one raster
+and upload across 100 unchanged draws, memory-budget eviction with free slots,
+LRU eviction, retained-reference safety and cleanup. These are host tests, not
+a claim of real-Vita 60 fps. Prior real-EXE sprite/tiling regressions still pass.
+Release: `ConciliaTower-v0.7.vpk`, APP_VER 00.07; same indexed artwork, spaced
+menu title, no proprietary EXE/resource files or shader compiler in package.

@@ -17,7 +17,7 @@ find_package(Freetype REQUIRED)
 
 set(VITA_APP_NAME "Concilia Tower")
 set(VITA_TITLEID  "CTWR00001")
-set(VITA_VERSION  "00.06")
+set(VITA_VERSION  "00.07")
 
 execute_process(
   COMMAND git describe --always --dirty
@@ -38,6 +38,8 @@ add_executable(${PROJECT_NAME}
   src/ne_resource.c
   src/sprites.c
   src/texture.c
+  src/text_cache.c
+  src/vita_input.c
   src/tower.c
   src/game.c
   src/people.c

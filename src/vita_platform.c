@@ -18,6 +18,8 @@
 #include <vitaGL.h>
 #include "debugScreen.h"
 #include "exe_prepare.h"
+#include "text_cache.h"
+#include <psp2/touch.h>
 
 #include <SDL_ttf.h>
 #include <psp2/io/stat.h>
@@ -120,7 +122,7 @@ void vita_boot_begin(void)
     /* Keep last run available even if the new run fails very early. */
     sceIoRemove(CT_DATA_DIR "/boot.previous.log");
     sceIoRename(CT_DATA_DIR "/boot.log", CT_DATA_DIR "/boot.previous.log");
-    vita_boot_log("Concilia Tower v0.6 APP_VER=00.06 build=%s: app start", CT_BUILD_VERSION);
+    vita_boot_log("Concilia Tower v0.7 APP_VER=00.07 build=%s: app start", CT_BUILD_VERSION);
     vita_boot_log("kernel process clock available; mkdir ux0:data=0x%08x data dir=0x%08x; log writable=%d",
                   data_rc, dir_rc, log_writable);
     vita_boot_log("newlib heap=%u MiB; startup diagnostics use no SDL/GL", _newlib_heap_size_user >> 20);
@@ -148,7 +150,7 @@ void vita_boost_clocks(void)
     int bus = scePowerSetBusClockFrequency(222);
     int gpu = scePowerSetGpuClockFrequency(222);
     int xbar = scePowerSetGpuXbarClockFrequency(166);
-    vita_boot_log("clock setup done: arm=%d bus=%d gpu=%d xbar=%d", arm, bus, gpu, xbar);
+    vita_boot_log("clock setup status: arm=%d bus=%d gpu=%d xbar=%d; actual MHz ARM=%d bus=%d GPU=%d xbar=%d", arm, bus, gpu, xbar, scePowerGetArmClockFrequency(),scePowerGetBusClockFrequency(),scePowerGetGpuClockFrequency(),scePowerGetGpuXbarClockFrequency());
 }
 
 void vita_prepare_userdata(void)
@@ -215,72 +217,123 @@ void vita_try_expand_ex_(void)
     sceIoSync("ux0:", 0);
 }
 
+static SDL_GameController *controller;
+static CT_VitaInput pointer;
+static int sdl_front_seen, sdk_touch_mode;
+static SceTouchPanelInfo front_panel;
+static double present_ms;
+
+void vita_input_hints(void)
+{
+    /* Translate front FINGER events ourselves: one click stream, no duplicated
+     * SDL_TOUCH_MOUSEID mouse or mouse-to-touch feedback. Installed SDL uses
+     * these environment gates and registers front ID=1 / back ID=2. */
+    unsetenv("VITA_DISABLE_TOUCH_FRONT");
+    SDL_setenv("VITA_DISABLE_TOUCH_BACK","1",1);
+    SDL_SetHintWithPriority(SDL_HINT_TOUCH_MOUSE_EVENTS,"0",SDL_HINT_OVERRIDE);
+    SDL_SetHintWithPriority(SDL_HINT_MOUSE_TOUCH_EVENTS,"0",SDL_HINT_OVERRIDE);
+    SDL_SetHintWithPriority(SDL_HINT_VITA_TOUCH_MOUSE_DEVICE,"0",SDL_HINT_OVERRIDE);
+    SDL_SetHintWithPriority(SDL_HINT_RENDER_BATCHING,"1",SDL_HINT_OVERRIDE);
+}
 void vita_init_runtime(void)
 {
-    for (int i = 0; i < SDL_NumJoysticks(); i++) {
-        if (SDL_IsGameController(i)) {
-            SDL_GameControllerOpen(i);
-            break;
+    for(int i=0;i<SDL_NumJoysticks();i++) if(SDL_IsGameController(i)) {
+        controller=SDL_GameControllerOpen(i);if(controller) break;
+    }
+    SDL_TouchID front=1;
+    for(int i=0;i<SDL_GetNumTouchDevices();i++) {
+        SDL_TouchID id=SDL_GetTouchDevice(i);const char *name=SDL_GetTouchName(i);
+        vita_boot_log("touch device index=%d id=%lld name=%s",i,(long long)id,name?name:"(null)");
+        if(name && !SDL_strcasecmp(name,"Front")) front=id;
+    }
+    CT_InputInit(&pointer,960,544,front);
+    int rc=sceTouchSetSamplingState(SCE_TOUCH_PORT_FRONT,SCE_TOUCH_SAMPLING_STATE_START);
+    memset(&front_panel,0,sizeof(front_panel));
+    int panel_rc=sceTouchGetPanelInfo(SCE_TOUCH_PORT_FRONT,&front_panel);
+    vita_boot_log("input v0.7: LEFT=camera RIGHT=cursor D-pad=fine pointer Cross=left-drag Circle=right Start=menu; controller=%p",(void*)controller);
+    vita_boot_log("front touch manual normalized->960x544; SDL synthetic mouse disabled; sampling=0x%x panel=0x%x area=%d,%d..%d,%d",rc,panel_rc,front_panel.minAaX,front_panel.minAaY,front_panel.maxAaX,front_panel.maxAaY);
+}
+void vita_input_event(const SDL_Event *ev,CT_InputSink sink)
+{
+    if(ev->type==SDL_FINGERDOWN || ev->type==SDL_FINGERMOTION || ev->type==SDL_FINGERUP) {
+        if(sdk_touch_mode) return;
+        if(ev->tfinger.touchId==pointer.front && !sdl_front_seen) {
+            sdl_front_seen=1;vita_boot_log("front SDL finger input received: normalized x=%.3f y=%.3f",ev->tfinger.x,ev->tfinger.y);
         }
     }
-}
-
-int vita_remap_event(SDL_Event *ev)
-{
-    if (ev->type != SDL_CONTROLLERBUTTONDOWN &&
-        ev->type != SDL_CONTROLLERBUTTONUP)
-        return 0;
-
-    int down = (ev->type == SDL_CONTROLLERBUTTONDOWN);
-    SDL_Keycode k = SDLK_UNKNOWN;
-    switch (ev->cbutton.button) {
-    case SDL_CONTROLLER_BUTTON_A:            k = SDLK_RETURN;     break; /* Cross */
-    case SDL_CONTROLLER_BUTTON_B:            k = SDLK_ESCAPE;     break; /* Circle */
-    case SDL_CONTROLLER_BUTTON_START:        k = SDLK_SPACE;      break;
-    case SDL_CONTROLLER_BUTTON_BACK:         k = SDLK_BACKQUOTE;  break; /* Select */
-    case SDL_CONTROLLER_BUTTON_DPAD_LEFT:    k = SDLK_LEFT;       break;
-    case SDL_CONTROLLER_BUTTON_DPAD_RIGHT:   k = SDLK_RIGHT;      break;
-    case SDL_CONTROLLER_BUTTON_DPAD_UP:      k = SDLK_UP;         break;
-    case SDL_CONTROLLER_BUTTON_DPAD_DOWN:    k = SDLK_DOWN;       break;
-    case SDL_CONTROLLER_BUTTON_LEFTSHOULDER: k = SDLK_MINUS;      break;
-    case SDL_CONTROLLER_BUTTON_RIGHTSHOULDER:k = SDLK_PLUS;       break;
-    case SDL_CONTROLLER_BUTTON_Y:            k = SDLK_F5;         break; /* Triangle: save */
-    default:
-        return 1;
+    if(!CT_InputEvent(&pointer,ev,sink)) {
+        SDL_Event copy=*ev;
+        if(copy.type==SDL_MOUSEMOTION) { copy.motion.x=(int)pointer.x;copy.motion.y=(int)pointer.y; }
+        else if(copy.type==SDL_MOUSEBUTTONDOWN || copy.type==SDL_MOUSEBUTTONUP) {
+            copy.button.x=(int)pointer.x;copy.button.y=(int)pointer.y;
+        }
+        sink(&copy);
     }
-
-    ev->type = down ? SDL_KEYDOWN : SDL_KEYUP;
-    ev->key.keysym.sym = k;
-    ev->key.state = down ? SDL_PRESSED : SDL_RELEASED;
-    ev->key.repeat = 0;
-    ev->key.keysym.mod = KMOD_NONE;
-    ev->key.keysym.scancode = SDL_GetScancodeFromKey(k);
-    return 0;
 }
-
-void vita_pan_camera(float *cam_fx, float *cam_fy)
+int vita_update_input(double dt,float *cx,float *cy,CT_InputSink sink)
 {
-    static SDL_GameController *gc;
-    if (!gc) {
-        for (int i = 0; i < SDL_NumJoysticks(); i++) {
-            if (SDL_IsGameController(i)) {
-                gc = SDL_GameControllerOpen(i);
-                break;
+    /* Some SDL/Vita backend variants gate touch on their private window.
+     * If the first real front contact produces no SDL FINGER event, permanently
+     * select SDK front polling for this run; never emit two click streams. */
+    if(!sdl_front_seen || sdk_touch_mode) {
+        SceTouchData data;
+        int peek=sceTouchPeek(SCE_TOUCH_PORT_FRONT,&data,1);
+        static int peek_warned;
+        if(peek<0 && !peek_warned) { vita_boot_log("front SDK touch peek failed: 0x%x",peek);peek_warned=1; }
+        if(peek>0) {
+            if(data.reportNum && !sdk_touch_mode) {
+                sdk_touch_mode=1;vita_boot_log("front contact seen by SDK but no SDL finger event: SDK touch fallback selected");
+            }
+            if(sdk_touch_mode) {
+                int n=-1;
+                for(unsigned i=0;i<data.reportNum;i++)
+                    if(!pointer.touch || data.report[i].id==(int)pointer.finger) { n=(int)i;break; }
+                if(n>=0) {
+                    float w=front_panel.maxAaX-front_panel.minAaX,h=front_panel.maxAaY-front_panel.minAaY;
+                    float x=(data.report[n].x-front_panel.minAaX)/(w>0?w:1919);
+                    float y=(data.report[n].y-front_panel.minAaY)/(h>0?h:1087);
+                    CT_InputTouch(&pointer,pointer.touch?SDL_FINGERMOTION:SDL_FINGERDOWN,x,y,data.report[n].id,sink);
+                } else if(pointer.touch) CT_InputTouch(&pointer,SDL_FINGERUP,pointer.x/960,pointer.y/544,pointer.finger,sink);
             }
         }
-        if (!gc)
-            return;
     }
-
-    const int dead = 8000;
-    int ax = SDL_GameControllerGetAxis(gc, SDL_CONTROLLER_AXIS_LEFTX);
-    int ay = SDL_GameControllerGetAxis(gc, SDL_CONTROLLER_AXIS_LEFTY);
-    int rx = SDL_GameControllerGetAxis(gc, SDL_CONTROLLER_AXIS_RIGHTX);
-    int ry = SDL_GameControllerGetAxis(gc, SDL_CONTROLLER_AXIS_RIGHTY);
-    if (abs(ax) > dead) *cam_fx += (ax / 32768.0f) * 14.0f;
-    if (abs(ay) > dead) *cam_fy += (ay / 32768.0f) * 14.0f;
-    if (abs(rx) > dead) *cam_fx += (rx / 32768.0f) * 26.0f;
-    if (abs(ry) > dead) *cam_fy += (ry / 32768.0f) * 26.0f;
+    if(controller && !SDL_GameControllerGetAttached(controller)) { SDL_GameControllerClose(controller);controller=NULL; }
+    int lx=0,ly=0,rx=0,ry=0;
+    if(controller) {
+        lx=SDL_GameControllerGetAxis(controller,SDL_CONTROLLER_AXIS_LEFTX);
+        ly=SDL_GameControllerGetAxis(controller,SDL_CONTROLLER_AXIS_LEFTY);
+        rx=SDL_GameControllerGetAxis(controller,SDL_CONTROLLER_AXIS_RIGHTX);
+        ry=SDL_GameControllerGetAxis(controller,SDL_CONTROLLER_AXIS_RIGHTY);
+    }
+    return CT_InputStep(&pointer,(float)dt,lx,ly,rx,ry,cx,cy,sink);
+}
+void vita_draw_cursor(SDL_Renderer *r) { CT_InputDraw(&pointer,r); }
+void vita_present(SDL_Renderer *r)
+{
+    Uint64 a=SDL_GetPerformanceCounter();SDL_RenderPresent(r);
+    present_ms=1000.0*(SDL_GetPerformanceCounter()-a)/SDL_GetPerformanceFrequency();
+}
+void vita_frame_finish(Uint64 start,double dt,double sim_ms,double render_ms)
+{
+    static Uint64 since;static unsigned frames;
+    static double worst,sim_sum,render_sum,present_sum;
+    Uint64 freq=SDL_GetPerformanceFrequency(),now=SDL_GetPerformanceCounter();
+    double elapsed=(double)(now-start)/freq;
+    /* Present already blocks on vsync. Only sleep any remaining frame budget,
+     * never add the old unconditional 16 ms after waiting for vblank. */
+    if(elapsed<1.0/60) {
+        double remaining=(1.0/60-elapsed)*1000;
+        if(remaining>=1) SDL_Delay((Uint32)remaining);
+    }
+    now=SDL_GetPerformanceCounter();if(!since) since=now;
+    frames++;if(dt>worst) worst=dt;
+    sim_sum+=sim_ms;render_sum+=SDL_max(0,render_ms-present_ms);present_sum+=present_ms;
+    double seconds=(double)(now-since)/freq;
+    if(seconds>=5) {
+        CT_TextureStats tx=CT_TextureStatsReset();CT_TextStats text=CT_TextStatsReset();
+        vita_boot_log("PERF %.1fs avg_fps=%.2f min_fps=%.2f worst_frame_ms=%.2f sim_ms=%.2f render_cpu_ms=%.2f present_ms=%.2f uploads=%u tile_pieces=%u scaled_cache_misses=%u text_hits=%u text_misses=%u",seconds,frames/seconds,worst>0?1/worst:0,worst*1000,sim_sum/frames,render_sum/frames,present_sum/frames,tx.uploads,tx.tile_draws,tx.scaled_cache_misses,text.hits,text.misses);
+        since=now;frames=0;worst=sim_sum=render_sum=present_sum=0;
+    }
 }
 
 /* Fatal boot notice: direct display framebuffer + SDK bitmap font. No
@@ -292,7 +345,7 @@ void vita_boot_notice(const char *message)
     reserve_error_frame();
     if (error_frame_reserved) sceDisplaySetFrameBuf(&error_frame, SCE_DISPLAY_SETBUF_NEXTFRAME);
     if (debug_screen_active)
-        psvDebugScreenPrintf("\e[2J\e[1;1HConcilia Tower v0.6\n\n%s\n\nLog: ux0:data/concilia-tower/boot.log\n", message);
+        psvDebugScreenPrintf("\e[2J\e[1;1HConcilia Tower v0.7\n\n%s\n\nLog: ux0:data/concilia-tower/boot.log\n", message);
 }
 
 void vita_boot_notice_end(void)
@@ -312,7 +365,7 @@ int vita_boot_fatal(const char *reason)
     int rc = error_frame_reserved ? sceDisplaySetFrameBuf(&error_frame, SCE_DISPLAY_SETBUF_NEXTFRAME) : -1;
     vita_boot_log("reserved direct framebuffer error screen restore=0x%08x", rc);
     if (rc >= 0) {
-        psvDebugScreenPrintf("\e[2J\e[1;1HConcilia Tower v0.6 - startup stopped\n\n%s\nSDL diagnostic (may be stale): %s\n\n", reason, error);
+        psvDebugScreenPrintf("\e[2J\e[1;1HConcilia Tower v0.7 - startup stopped\n\n%s\nSDL diagnostic (may be stale): %s\n\n", reason, error);
         psvDebugScreenPrintf("Log: ux0:data/concilia-tower/boot.log\nLog writable: %s\n\n", log_writable ? "yes" : "NO - check free space/write access");
         psvDebugScreenPrintf("EXE search (FOUND = detected, not yet validated):\n%s\n", search_report);
         psvDebugScreenPrintf("\nSend boot.log and a photo of this screen.\nRelease buttons, then press START or Circle to exit.\n");

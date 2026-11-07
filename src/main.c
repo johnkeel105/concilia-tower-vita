@@ -17,6 +17,7 @@
 #include "ne_resource.h"
 #include "exe_prepare.h"
 #include "sprites.h"
+#include "text_cache.h"
 #include "tower.h"
 #include "game.h"
 #ifdef __EMSCRIPTEN__
@@ -1029,9 +1030,9 @@ static void format_money(long amount, char *buf, int bufsize)
 static CT_Texture *render_text(const char *text, SDL_Color color, int *w, int *h)
 {
     if (!game.font || !text || !text[0]) return NULL;
-    SDL_Surface *surf = TTF_RenderUTF8_Blended(game.font, text, color);
+    SDL_Surface *surf = CT_RenderUTF8_Blended(game.font, text, color);
     if (!surf) return NULL;
-    CT_Texture *tex = CT_CreateTextureFromSurface(game.renderer, surf);
+    CT_Texture *tex = CT_TextTexture(game.renderer, surf);
     *w = surf->w;
     *h = surf->h;
     SDL_FreeSurface(surf);
@@ -1106,6 +1107,27 @@ static void render_sky(void)
          * streak effect below. */
         int overcast = game.rainy_day && game.sim.hour >= 8 &&
                        game.sim.hour < 16;
+#ifdef __vita__
+        static CT_Texture *gradient[2];
+        if (!gradient[overcast]) {
+            SDL_Surface *sky=SDL_CreateRGBSurfaceWithFormat(0,1,256,32,SDL_PIXELFORMAT_ARGB8888);
+            if (sky) {
+                for(int y=0;y<256;y++) {
+                    float t=y/256.0f;
+                    int r=overcast?(int)(104+t*46):(int)(74+t*106);
+                    int g=overcast?(int)(108+t*46):(int)(140+t*80);
+                    int b=overcast?(int)(118+t*46):(int)(220+t*35);
+                    ((Uint32 *)((Uint8 *)sky->pixels+y*sky->pitch))[0]=SDL_MapRGBA(sky->format,r,g,b,255);
+                }
+                gradient[overcast]=CT_CreateTextureFromSurface(game.renderer,sky);SDL_FreeSurface(sky);
+                CT_SetTextureScaleMode(gradient[overcast],SDL_ScaleModeLinear);
+            }
+        }
+        if (gradient[overcast]) {
+            SDL_Rect dst={0,0,game.screen_w,sky_h};
+            CT_RenderCopy(game.renderer,gradient[overcast],NULL,&dst);
+        } else
+#endif
         for (int y = 0; y < sky_h; y++) {
             float t = (float)y / (sky_h > 0 ? (float)sky_h : 1.0f);
             int r, g, b;
@@ -2288,9 +2310,9 @@ static void render_tower(void)
                 else if (f == 0) snprintf(flabel, sizeof(flabel), "L");
                 else snprintf(flabel, sizeof(flabel), "%d", f);
                 
-                SDL_Surface *ts = TTF_RenderText_Blended(game.font_small, flabel, white);
+                SDL_Surface *ts = CT_RenderText_Blended(game.font_small, flabel, white);
                 if (ts) {
-                    CT_Texture *tt = CT_CreateTextureFromSurface(game.renderer, ts);
+                    CT_Texture *tt = CT_TextTexture(game.renderer, ts);
                     SDL_Rect dst = { 2, fsy + CELL_H/2 - ts->h/2, ts->w, ts->h };
                     CT_RenderCopy(game.renderer, tt, NULL, &dst);
                     CT_DestroyTexture(tt);
@@ -2334,9 +2356,9 @@ static void render_tower(void)
                          t->demand_category);
             }
             
-            SDL_Surface *ts = TTF_RenderText_Blended(game.font_small, info, yellow);
+            SDL_Surface *ts = CT_RenderText_Blended(game.font_small, info, yellow);
             if (ts) {
-                CT_Texture *tt = CT_CreateTextureFromSurface(game.renderer, ts);
+                CT_Texture *tt = CT_TextTexture(game.renderer, ts);
                 int label_y = ty + CELL_H / 2 - ts->h / 2;
                 SDL_Rect dst = { tx + 4, label_y, ts->w, ts->h };
                 CT_RenderCopy(game.renderer, tt, NULL, &dst);
@@ -3096,10 +3118,10 @@ static void render_elv_dialog_faithful(void)
                 else              snprintf(fl, sizeof fl, "%d", wf);
                 SDL_Color ink = { 40, 40, 40, 255 };
                 SDL_Surface *ts =
-                    TTF_RenderText_Blended(game.font_small, fl, ink);
+                    CT_RenderText_Blended(game.font_small, fl, ink);
                 if (ts) {
                     CT_Texture *tt =
-                        CT_CreateTextureFromSurface(game.renderer, ts);
+                        CT_TextTexture(game.renderer, ts);
                     SDL_Rect dst = { gx0 - 3 - ts->w, cy + 6 - ts->h / 2,
                                      ts->w, ts->h };
                     CT_RenderCopy(game.renderer, tt, NULL, &dst);
@@ -3274,9 +3296,9 @@ static void draw_text_right_small(const char *text, int right_x, int y,
                                   SDL_Color c)
 {
     if (!game.font_small || !text || !text[0]) return;
-    SDL_Surface *surf = TTF_RenderUTF8_Blended(game.font_small, text, c);
+    SDL_Surface *surf = CT_RenderUTF8_Blended(game.font_small, text, c);
     if (!surf) return;
-    CT_Texture *tex = CT_CreateTextureFromSurface(game.renderer, surf);
+    CT_Texture *tex = CT_TextTexture(game.renderer, surf);
     SDL_Rect dst = { right_x - surf->w, y, surf->w, surf->h };
     CT_RenderCopy(game.renderer, tex, NULL, &dst);
     SDL_FreeSurface(surf);
@@ -4512,9 +4534,9 @@ static void draw_win31_titlebar(int x, int y, int w, const char *title)
     /* Title text */
     if (game.font_small && title) {
         SDL_Color white = {255, 255, 255, 255};
-        SDL_Surface *ts = TTF_RenderText_Blended(game.font_small, title, white);
+        SDL_Surface *ts = CT_RenderText_Blended(game.font_small, title, white);
         if (ts) {
-            CT_Texture *tt = CT_CreateTextureFromSurface(game.renderer, ts);
+            CT_Texture *tt = CT_TextTexture(game.renderer, ts);
             SDL_Rect dst = { x + 4, y + 2, ts->w, ts->h };
             CT_RenderCopy(game.renderer, tt, NULL, &dst);
             CT_DestroyTexture(tt);
@@ -4569,10 +4591,10 @@ static void render_info_window(void)
             CT_RenderCopy(game.renderer, tl->texture, NULL, &dst);
         } else if (game.font_small) {
             SDL_Color gold = {220, 180, 0, 255};
-            SDL_Surface *ts = TTF_RenderUTF8_Blended(game.font_small,
+            SDL_Surface *ts = CT_RenderUTF8_Blended(game.font_small,
                                                      "T O W E R", gold);
             if (ts) {
-                CT_Texture *tt = CT_CreateTextureFromSurface(game.renderer, ts);
+                CT_Texture *tt = CT_TextTexture(game.renderer, ts);
                 SDL_Rect dst = { star_x, wy + 4, ts->w, ts->h };
                 CT_RenderCopy(game.renderer, tt, NULL, &dst);
                 CT_DestroyTexture(tt);
@@ -4601,9 +4623,9 @@ static void render_info_window(void)
             }
         }
         stars[pos] = '\0';
-        SDL_Surface *ts = TTF_RenderUTF8_Blended(game.font_small, stars, gold);
+        SDL_Surface *ts = CT_RenderUTF8_Blended(game.font_small, stars, gold);
         if (ts) {
-            CT_Texture *tt = CT_CreateTextureFromSurface(game.renderer, ts);
+            CT_Texture *tt = CT_TextTexture(game.renderer, ts);
             SDL_Rect dst = { star_x, wy + 3, ts->w, ts->h };
             CT_RenderCopy(game.renderer, tt, NULL, &dst);
             CT_DestroyTexture(tt);
@@ -4631,9 +4653,9 @@ static void render_info_window(void)
         char date_buf[64];
         snprintf(date_buf, sizeof(date_buf), "%s / %dQ / %d%s Year",
                  wd, q, year, ysuf);
-        SDL_Surface *ts = TTF_RenderText_Blended(finfo, date_buf, black);
+        SDL_Surface *ts = CT_RenderText_Blended(finfo, date_buf, black);
         if (ts) {
-            CT_Texture *tt = CT_CreateTextureFromSurface(game.renderer, ts);
+            CT_Texture *tt = CT_TextTexture(game.renderer, ts);
             SDL_Rect dst = { wx + 160, wy + 3, ts->w, ts->h };
             CT_RenderCopy(game.renderer, tt, NULL, &dst);
             CT_DestroyTexture(tt);
@@ -4646,9 +4668,9 @@ static void render_info_window(void)
         SDL_Color black = {0, 0, 0, 255};
         char money_buf[64];
         format_money(game.tower.money, money_buf, sizeof(money_buf));
-        SDL_Surface *ts = TTF_RenderText_Blended(finfo, money_buf, black);
+        SDL_Surface *ts = CT_RenderText_Blended(finfo, money_buf, black);
         if (ts) {
-            CT_Texture *tt = CT_CreateTextureFromSurface(game.renderer, ts);
+            CT_Texture *tt = CT_TextTexture(game.renderer, ts);
             /* The bg art's Fund box interior is y3..18 — baseline-align with
              * the baked-in "Fund" label, not the rml's top:2. */
             SDL_Rect dst = { wx + INFO_BAR_W - ts->w - 6, wy + 4, ts->w, ts->h };
@@ -4660,9 +4682,9 @@ static void render_info_window(void)
         /* Population — time.rml: right 6, top 19, bare number */
         char pop_buf[32];
         snprintf(pop_buf, sizeof(pop_buf), "%d", game.tower.population);
-        ts = TTF_RenderText_Blended(finfo, pop_buf, black);
+        ts = CT_RenderText_Blended(finfo, pop_buf, black);
         if (ts) {
-            CT_Texture *tt = CT_CreateTextureFromSurface(game.renderer, ts);
+            CT_Texture *tt = CT_TextTexture(game.renderer, ts);
             /* Pop box interior is y21..36 in the bg art */
             SDL_Rect dst = { wx + INFO_BAR_W - ts->w - 6, wy + 21, ts->w, ts->h };
             CT_RenderCopy(game.renderer, tt, NULL, &dst);
@@ -4675,9 +4697,9 @@ static void render_info_window(void)
     if (game.font_small && event_msg_total > 0) {
         SDL_Color dk = {0, 0, 100, 255};
         int idx = (event_msg_head - 1 + EVENT_MSG_COUNT) % EVENT_MSG_COUNT;
-        SDL_Surface *ts = TTF_RenderText_Blended(game.font_small, event_messages[idx], dk);
+        SDL_Surface *ts = CT_RenderText_Blended(game.font_small, event_messages[idx], dk);
         if (ts) {
-            CT_Texture *tt = CT_CreateTextureFromSurface(game.renderer, ts);
+            CT_Texture *tt = CT_TextTexture(game.renderer, ts);
             /* The bg art's sunken message groove interior is x41..301, y25..35 */
             int max_w = INFO_BAR_W - 42 - 130;
             int dw = ts->w > max_w ? max_w : ts->w;
@@ -5352,9 +5374,9 @@ static void render_toolbox(void)
             SDL_Rect btn = { bx + 2, by + 2, TOOL_BTN_SIZE - 4, TOOL_BTN_SIZE - 4 };
             SDL_RenderFillRect(game.renderer, &btn);
             SDL_Color black = {0, 0, 0, 255};
-            SDL_Surface *ts = TTF_RenderText_Blended(game.font_small, tb->label, black);
+            SDL_Surface *ts = CT_RenderText_Blended(game.font_small, tb->label, black);
             if (ts) {
-                CT_Texture *tt = CT_CreateTextureFromSurface(game.renderer, ts);
+                CT_Texture *tt = CT_TextTexture(game.renderer, ts);
                 SDL_Rect dst = { bx + TOOL_BTN_SIZE/2 - ts->w/2,
                                  by + TOOL_BTN_SIZE/2 - ts->h/2, ts->w, ts->h };
                 CT_RenderCopy(game.renderer, tt, NULL, &dst);
@@ -5382,10 +5404,10 @@ static void render_toolbox(void)
         int rows = tool_visible_rows();
         int label_y = grid_y + rows * (TOOL_BTN_SIZE + TOOL_BTN_PAD) + 4;
         for (int li = 0; li < 2; li++) {
-            SDL_Surface *ts = TTF_RenderText_Blended(game.font_small,
+            SDL_Surface *ts = CT_RenderText_Blended(game.font_small,
                                                      lines[li], black);
             if (!ts) continue;
-            CT_Texture *tt = CT_CreateTextureFromSurface(game.renderer, ts);
+            CT_Texture *tt = CT_TextTexture(game.renderer, ts);
             int dw = ts->w > TOOL_WIN_W - 8 ? TOOL_WIN_W - 8 : ts->w;
             SDL_Rect src2 = { 0, 0, dw, ts->h };
             SDL_Rect dst = { wx + (TOOL_WIN_W - dw) / 2, label_y, dw, ts->h };
@@ -5431,9 +5453,9 @@ static int draw_menu_text(const char *text, int x, int y, int state)
     if (state == 2)      { color = (SDL_Color){WIN31_DISABLED, 255}; }
     else if (state == 1) { color = (SDL_Color){WIN31_SEL_TEXT, 255}; }
     else                 { color = (SDL_Color){WIN31_TEXT, 255}; }
-    SDL_Surface *surf = TTF_RenderUTF8_Blended(game.font_small, text, color);
+    SDL_Surface *surf = CT_RenderUTF8_Blended(game.font_small, text, color);
     if (!surf) return 0;
-    CT_Texture *tex = CT_CreateTextureFromSurface(game.renderer, surf);
+    CT_Texture *tex = CT_TextTexture(game.renderer, surf);
     SDL_Rect dst = { x, y, surf->w, surf->h };
     CT_RenderCopy(game.renderer, tex, NULL, &dst);
     int w = surf->w;
@@ -6510,7 +6532,7 @@ static void render_event_alert(void)
 
     int iw = icon ? icon->w : 0, ih = icon ? icon->h : 0;
     TTF_Font *f = game.font ? game.font : game.font_small;
-    SDL_Surface *ts = f ? TTF_RenderText_Blended(f, label, fg) : NULL;
+    SDL_Surface *ts = f ? CT_RenderText_Blended(f, label, fg) : NULL;
     int tw = ts ? ts->w : 0, th = ts ? ts->h : 0;
 
     int pad = 10, gap = (iw && tw) ? 8 : 0;
@@ -6525,7 +6547,7 @@ static void render_event_alert(void)
         CT_RenderCopy(game.renderer, icon->texture, NULL, &d);
     }
     if (ts) {
-        CT_Texture *tt = CT_CreateTextureFromSurface(game.renderer, ts);
+        CT_Texture *tt = CT_TextTexture(game.renderer, ts);
         SDL_Rect d = { px + pad + iw + gap, py + (panel_h - th) / 2, tw, th };
         CT_RenderCopy(game.renderer, tt, NULL, &d);
         CT_DestroyTexture(tt);
@@ -7137,9 +7159,9 @@ static void draw_label31(SDL_Rect r, SDL_Rect field, const char *s, SDL_Color c)
 {
     TTF_Font *f = game.font_dlg ? game.font_dlg : game.font;
     if (!f || !s || !s[0]) return;
-    SDL_Surface *surf = TTF_RenderUTF8_Blended(f, s, c);
+    SDL_Surface *surf = CT_RenderUTF8_Blended(f, s, c);
     if (!surf) return;
-    CT_Texture *t = CT_CreateTextureFromSurface(game.renderer, surf);
+    CT_Texture *t = CT_TextTexture(game.renderer, surf);
     int tw = surf->w, th = surf->h;
     SDL_FreeSurface(surf);
     if (!t) return;
@@ -8276,9 +8298,11 @@ static void render(void)
         CT_BOOT("first gameplay frame draw begin");
     }
 #endif
+#ifndef __vita__
     /* Cursor follows the active tool: crosshair while bulldozing, else arrow. */
     SDL_Cursor *want = game.demolish_mode ? game.cursor_demolish : game.cursor_arrow;
     if (want && SDL_GetCursor() != want) SDL_SetCursor(want);
+#endif
 
     SDL_SetRenderDrawColor(game.renderer, 0, 0, 0, 255);
     SDL_RenderClear(game.renderer);
@@ -8343,7 +8367,12 @@ static void render(void)
         CT_BOOT("first gameplay frame submit begin");
     }
 #endif
+#ifdef __vita__
+    vita_draw_cursor(game.renderer);
+    vita_present(game.renderer);
+#else
     SDL_RenderPresent(game.renderer);
+#endif
 #ifdef __vita__
     if (first_frame) {
         CT_BOOT("first gameplay frame presented");
@@ -9143,8 +9172,18 @@ static void cap_drag_track(void)
 static void handle_event(SDL_Event *ev)
 {
 #ifdef __vita__
-    if (vita_remap_event(ev))
-        return;
+    /* Synthesized pointer events already use the fixed renderer logical space.
+     * Keep hover/build state coherent even when an early modal consumes them. */
+    if (ev->type == SDL_MOUSEMOTION) { game.mouse_x=ev->motion.x; game.mouse_y=ev->motion.y; }
+    else if (ev->type == SDL_MOUSEBUTTONDOWN || ev->type == SDL_MOUSEBUTTONUP) {
+        game.mouse_x=ev->button.x; game.mouse_y=ev->button.y;
+    }
+    if(ev->type==SDL_MOUSEMOTION || ev->type==SDL_MOUSEBUTTONDOWN || ev->type==SDL_MOUSEBUTTONUP)
+        screen_to_grid(game.mouse_x,game.mouse_y,&game.mouse_floor,&game.mouse_cell);
+    if(ev->type==SDL_WINDOWEVENT && ev->window.event==SDL_WINDOWEVENT_FOCUS_LOST) {
+        game.dragging=game.win_dragging=game.cam_panning=game.cap_drag=0;
+        audio_stop_loop();
+    }
 #endif
     /* Quit save-prompt: fully modal, topmost. */
     if (game.quit_confirm) {
@@ -9267,6 +9306,10 @@ static void handle_event(SDL_Event *ev)
         
     case SDL_KEYDOWN:
         switch (ev->key.keysym.sym) {
+        case SDLK_F10:
+            game.menu_open=game.menu_open>=0?-1:0;
+            game.menu_hover=-1;
+            break;
         case SDLK_ESCAPE:
             /* Esc closes the topmost thing — never the game. It used to
              * hard-quit with no prompt, which in a browser nuked the whole
@@ -9900,8 +9943,12 @@ static void handle_event(SDL_Event *ev)
         /* Web canvas is fixed 960x720 — browser-side CSS resize events
          * must never shrink the game's render size. */
         if (ev->window.event == SDL_WINDOWEVENT_SIZE_CHANGED) {
+#ifdef __vita__
+            game.screen_w=960;game.screen_h=544;
+#else
             game.screen_w = ev->window.data1;
             game.screen_h = ev->window.data2;
+#endif
         }
 #endif
         break;
@@ -10195,6 +10242,9 @@ int main(int argc, char *argv[])
     vita_boot_watch_stage("SDL_Init video/controller (audio optional later)");
     SDL_ClearError();
 #endif
+#ifdef __vita__
+    vita_input_hints();
+#endif
     CT_BOOT("SDL_Init begin (video/controller; optional audio initialized separately)");
     /* Initialize SDL */
 #ifdef __vita__
@@ -10277,12 +10327,17 @@ int main(int argc, char *argv[])
     SDL_RenderPresent(game.renderer);
     CT_BOOT("initial blank frame presented");
 
+#ifdef __vita__
+    SDL_RenderSetLogicalSize(game.renderer,960,544);
+    SDL_ShowCursor(SDL_DISABLE); /* Native backend has no usable system cursor. */
+#else
     /* Replace the bare X-server root cursor with a proper arrow; the bulldozer
      * gets a crosshair. (SimTower swaps the cursor per active tool.) */
     game.cursor_arrow    = SDL_CreateSystemCursor(SDL_SYSTEM_CURSOR_ARROW);
     game.cursor_demolish = SDL_CreateSystemCursor(SDL_SYSTEM_CURSOR_CROSSHAIR);
     SDL_ShowCursor(SDL_ENABLE);
     if (game.cursor_arrow) SDL_SetCursor(game.cursor_arrow);
+#endif
 
     /* Initialize SDL_ttf fonts */
 #ifdef __vita__
@@ -10738,7 +10793,7 @@ int main(int argc, char *argv[])
                     if (px[i] & 0x000000FF)          /* opaque -> white */
                         px[i] |= 0xFFFFFF00;
                 game.queue_hot =
-                    CT_CreateTextureFromSurface(game.renderer, rgba);
+                    CT_TextTexture(game.renderer, rgba);
                 if (game.queue_hot)
                     CT_SetTextureBlendMode(game.queue_hot,
                                             SDL_BLENDMODE_BLEND);
@@ -10803,7 +10858,7 @@ int main(int argc, char *argv[])
             /* Make gray background transparent (0x999999) */
             SDL_SetColorKey(items_surf, SDL_TRUE, SDL_MapRGB(items_surf->format, 0x99, 0x99, 0x99));
             
-            game.ui_items = CT_CreateTextureFromSurface(game.renderer, items_surf);
+            game.ui_items = CT_TextTexture(game.renderer, items_surf);
             game.ui_items_w = items_surf->w;
             game.ui_items_h = items_surf->h;
             CT_SetTextureBlendMode(game.ui_items, SDL_BLENDMODE_BLEND);
@@ -10818,7 +10873,7 @@ int main(int argc, char *argv[])
             if (res) {
                 SDL_Surface *surf = sprites_dib_to_surface(&game.sprites, res);
                 if (surf) {
-                    game.ui_timebar = CT_CreateTextureFromSurface(game.renderer, surf);
+                    game.ui_timebar = CT_TextTexture(game.renderer, surf);
                     game.ui_timebar_w = surf->w;
                     game.ui_timebar_h = surf->h;
                     SDL_FreeSurface(surf);
@@ -10838,7 +10893,7 @@ int main(int argc, char *argv[])
                 if (surf) {
                     /* Make gray (0x999999) transparent */
                     SDL_SetColorKey(surf, SDL_TRUE, SDL_MapRGB(surf->format, 0x99, 0x99, 0x99));
-                    game.ui_star[si] = CT_CreateTextureFromSurface(game.renderer, surf);
+                    game.ui_star[si] = CT_TextTexture(game.renderer, surf);
                     if (si == 0) { game.ui_star_w = surf->w; game.ui_star_h = surf->h; }
                     CT_SetTextureBlendMode(game.ui_star[si], SDL_BLENDMODE_BLEND);
                     SDL_FreeSurface(surf);
@@ -10871,7 +10926,7 @@ int main(int argc, char *argv[])
                     SDL_BlitSurface(bmp, NULL, speed_surf, &dst);
                     SDL_FreeSurface(bmp);
                 }
-                game.ui_speed = CT_CreateTextureFromSurface(game.renderer, speed_surf);
+                game.ui_speed = CT_TextTexture(game.renderer, speed_surf);
                 game.ui_speed_w = speed_surf->w;
                 game.ui_speed_h = speed_surf->h;
                 SDL_FreeSurface(speed_surf);
@@ -10895,7 +10950,7 @@ int main(int argc, char *argv[])
                     SDL_BlitSurface(bmp, NULL, tools_surf, &dst);
                     SDL_FreeSurface(bmp);
                 }
-                game.ui_tools = CT_CreateTextureFromSurface(game.renderer, tools_surf);
+                game.ui_tools = CT_TextTexture(game.renderer, tools_surf);
                 game.ui_tools_w = tools_surf->w;
                 game.ui_tools_h = tools_surf->h;
                 SDL_FreeSurface(tools_surf);
@@ -10909,7 +10964,7 @@ int main(int argc, char *argv[])
             if (res) {
                 SDL_Surface *surf = sprites_dib_to_surface(&game.sprites, res);
                 if (surf) {
-                    game.ui_map = CT_CreateTextureFromSurface(game.renderer, surf);
+                    game.ui_map = CT_TextTexture(game.renderer, surf);
                     game.ui_map_w = surf->w;
                     game.ui_map_h = surf->h;
                     SDL_FreeSurface(surf);
@@ -11265,8 +11320,8 @@ int main(int argc, char *argv[])
     printf("  F3: analytics graphs, F4: tuning/modding panel\n");
     printf("  ` (backtick): toggle debug labels, F12: screenshot, Q: quit (Esc closes windows)\n");
 #ifdef __vita__
-    printf("  Vita: touch = mouse, analog/D-pad = pan, Cross = confirm, Circle = back,\n");
-    printf("        Start = pause, L/R = speed, Triangle = save, Select = debug labels\n");
+    printf("  Vita: left stick=camera, right stick=cursor, D-pad=fine cursor, front touch=tap/drag\n");
+    printf("        Cross=left click/drag, Circle=right click, Start=menu, L/R=speed, Triangle=save\n");
 #endif
     printf("\n");
     
@@ -11283,15 +11338,30 @@ int main(int argc, char *argv[])
     game.build_type = ITEM_FLOOR;
 
     int frame = 0;
+#ifdef __vita__
+    CT_SimClock sim_clock={0};
+    Uint64 previous_frame=SDL_GetPerformanceCounter();
+#endif
     CT_BOOT("startup complete; game loop begin");
     while (game.running) {
+#ifdef __vita__
+        Uint64 frame_start=SDL_GetPerformanceCounter();
+        double frame_dt=(double)(frame_start-previous_frame)/SDL_GetPerformanceFrequency();
+        previous_frame=frame_start;
+#endif
         SDL_Event ev;
         while (SDL_PollEvent(&ev)) {
+#ifdef __vita__
+            vita_input_event(&ev,handle_event);
+#else
             handle_event(&ev);
+#endif
         }
 #ifdef __vita__
-        vita_pan_camera(&game.cam_fx, &game.cam_fy);
+        if(vita_update_input(frame_dt,&game.cam_fx,&game.cam_fy,handle_event)) game.cam_anim=0;
         clamp_camera();
+        screen_to_grid(game.mouse_x,game.mouse_y,&game.mouse_floor,&game.mouse_cell);
+        cap_drag_track();
 #endif
 
         /* Build-drag clatter (#7001, referee row 18): a looping sound that
@@ -11370,11 +11440,15 @@ int main(int argc, char *argv[])
              * experience); FAST ticks every frame (= the EXE's Fast Mode
              * on a fast machine); TURBO (legacy saves) 3x. */
             {
+#ifdef __vita__
+                int steps=CT_SimSteps(&sim_clock,frame_dt,game.sim.speed);
+#else
                 static unsigned pace = 0;
                 int steps;
                 if (game.sim.speed == SPEED_FAST)       steps = 1;
                 else if (game.sim.speed == SPEED_TURBO) steps = 3;
                 else steps = (++pace % 4 == 0) ? 1 : 0;
+#endif
                 for (int s = 0; s < steps; s++)
                     game_update(&game.sim, &game.tower);
             }
@@ -11843,7 +11917,16 @@ int main(int argc, char *argv[])
             }
         }
         clamp_camera();
+#ifdef __vita__
+        screen_to_grid(game.mouse_x,game.mouse_y,&game.mouse_floor,&game.mouse_cell);
+        Uint64 render_start=SDL_GetPerformanceCounter();
+#endif
         render();
+#ifdef __vita__
+        double render_ms=1000.0*(SDL_GetPerformanceCounter()-render_start)/SDL_GetPerformanceFrequency();
+        double sim_ms=1000.0*(render_start-frame_start)/SDL_GetPerformanceFrequency();
+        vita_frame_finish(frame_start,frame_dt,sim_ms,render_ms);
+#endif
         frame++;
 
         /* Capture mode: mix one frame's worth of audio (60fps -> real-time
@@ -11985,13 +12068,16 @@ int main(int argc, char *argv[])
         /* In headless --screenshot mode, fast-forward the warm-up frames with no
          * frame delay so a deep sim state (e.g. a settlement several game-days
          * out) is reachable quickly; pace normally otherwise. */
-        if (!auto_screenshot) SDL_Delay(16); /* ~60fps */
+#ifndef __vita__
+        if (!auto_screenshot) SDL_Delay(16); /* Vita is paced by present + remaining budget. */
+#endif
     }
     
     CT_BOOT("normal shutdown begin");
     /* Cleanup */
     audio_shutdown();
     sprites_free(&game.sprites);
+    CT_TextCacheClear();
     if (game.font) TTF_CloseFont(game.font);
     if (game.font_small) TTF_CloseFont(game.font_small);
     if (game.font_info) TTF_CloseFont(game.font_info);

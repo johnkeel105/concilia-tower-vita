@@ -1,8 +1,9 @@
-/* Vita / vitaGL helpers for the ConciliaTower port. */
+/* Vita native-GXM boot, input and frame diagnostics. */
 #ifndef CT_VITA_PLATFORM_H
 #define CT_VITA_PLATFORM_H
 
 #include <SDL.h>
+#include "vita_input.h"
 
 #define strcasecmp  SDL_strcasecmp
 #define strncasecmp SDL_strncasecmp
@@ -26,11 +27,12 @@ void vita_try_expand_ex_(void);
 void vita_init_runtime(void);
 const char *vita_save_path(void);
 
-/* Returns 1 if the event was a controller button that should be ignored.
- * Returns 0 after rewriting a mapped button into a key event, or if the
- * event was not a controller button. */
-int vita_remap_event(SDL_Event *ev);
-void vita_pan_camera(float *cam_fx, float *cam_fy);
+void vita_input_hints(void);
+void vita_input_event(const SDL_Event *,CT_InputSink);
+int vita_update_input(double dt,float *,float *,CT_InputSink);
+void vita_draw_cursor(SDL_Renderer *);
+void vita_present(SDL_Renderer *);
+void vita_frame_finish(Uint64 start,double dt,double sim_ms,double render_ms);
 
 /* Full-screen notice if SIMTOWER.EXE is missing. Returns 1. */
 int vita_missing_exe_screen(void);
