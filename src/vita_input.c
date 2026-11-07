@@ -3,7 +3,7 @@
 #include <string.h>
 #define POINTER_ID 0x4354564du
 static Uint32 buttons(const CT_VitaInput *p)
-{ return ((p->cross||p->touch)?SDL_BUTTON_LMASK:0)|(p->circle?SDL_BUTTON_RMASK:0); }
+{ return ((p->cross||p->rtrigger||p->touch)?SDL_BUTTON_LMASK:0)|(p->secondary?SDL_BUTTON_RMASK:0); }
 static void motion(CT_VitaInput *p,CT_InputSink sink)
 {
     int x=(int)p->x,y=(int)p->y;
@@ -39,11 +39,11 @@ void CT_InputTouch(CT_VitaInput *p,int type,float x,float y,SDL_FingerID id,CT_I
     if(!p->focused || !isfinite(x) || !isfinite(y)) return;
     if(type==SDL_FINGERDOWN) { if(p->touch) return; p->finger=id; }
     else if(!p->touch || p->finger!=id) return;
-    int was=p->cross||p->touch;
+    int was=p->cross||p->rtrigger||p->touch;
     p->x=x*p->w;p->y=y*p->h;clamp(p);p->visible=1;motion(p,sink);
     if(type==SDL_FINGERDOWN) p->touch=1;
     else if(type==SDL_FINGERUP) p->touch=0;
-    edge(p,SDL_BUTTON_LEFT,was,p->cross||p->touch,sink);
+    edge(p,SDL_BUTTON_LEFT,was,p->cross||p->rtrigger||p->touch,sink);
 }
 int CT_InputEvent(CT_VitaInput *p,const SDL_Event *ev,CT_InputSink sink)
 {
@@ -60,13 +60,13 @@ int CT_InputEvent(CT_VitaInput *p,const SDL_Event *ev,CT_InputSink sink)
         return 0;
     }
     if(ev->type==SDL_CONTROLLERDEVICEREMOVED) {
-        int left=p->cross||p->touch,right=p->circle;
-        p->cross=p->circle=0;p->dpad=0;
+        int left=p->cross||p->rtrigger||p->touch,right=p->secondary;
+        p->cross=p->rtrigger=p->secondary=0;p->dpad=0;
         edge(p,SDL_BUTTON_LEFT,left,p->touch,sink);edge(p,SDL_BUTTON_RIGHT,right,0,sink);
     }
     if(ev->type==SDL_WINDOWEVENT && ev->window.event==SDL_WINDOWEVENT_FOCUS_LOST) {
-        int left=p->cross||p->touch,right=p->circle;
-        p->cross=p->circle=p->touch=0;p->dpad=0;p->focused=0;p->hold=0;
+        int left=p->cross||p->rtrigger||p->touch,right=p->secondary;
+        p->cross=p->rtrigger=p->secondary=p->touch=0;p->dpad=0;p->focused=0;p->hold=0;
         edge(p,SDL_BUTTON_LEFT,left,0,sink);edge(p,SDL_BUTTON_RIGHT,right,0,sink);
     }
     if(ev->type==SDL_WINDOWEVENT && ev->window.event==SDL_WINDOWEVENT_FOCUS_GAINED) p->focused=1;
@@ -74,11 +74,12 @@ int CT_InputEvent(CT_VitaInput *p,const SDL_Event *ev,CT_InputSink sink)
     int down=ev->type==SDL_CONTROLLERBUTTONDOWN,b=ev->cbutton.button;
     if(!p->focused) return 1;
     p->visible=1;motion(p,sink);
-    if(b==SDL_CONTROLLER_BUTTON_A) {
-        int was=p->cross||p->touch;p->cross=down;edge(p,SDL_BUTTON_LEFT,was,p->cross||p->touch,sink);return 1;
+    if(b==SDL_CONTROLLER_BUTTON_A || b==SDL_CONTROLLER_BUTTON_RIGHTSHOULDER) {
+        int was=p->cross||p->rtrigger||p->touch;
+        if(b==SDL_CONTROLLER_BUTTON_A) p->cross=down;else p->rtrigger=down;edge(p,SDL_BUTTON_LEFT,was,p->cross||p->rtrigger||p->touch,sink);return 1;
     }
-    if(b==SDL_CONTROLLER_BUTTON_B) {
-        int was=p->circle;p->circle=down;edge(p,SDL_BUTTON_RIGHT,was,down,sink);return 1;
+    if(b==SDL_CONTROLLER_BUTTON_LEFTSHOULDER) {
+        int was=p->secondary;p->secondary=down;edge(p,SDL_BUTTON_RIGHT,was,down,sink);return 1;
     }
     int bit=0,dx=0,dy=0;
     switch(b) {
@@ -96,9 +97,9 @@ int CT_InputEvent(CT_VitaInput *p,const SDL_Event *ev,CT_InputSink sink)
     switch(b) {
     case SDL_CONTROLLER_BUTTON_START:key=SDLK_F10;break;
     case SDL_CONTROLLER_BUTTON_BACK:key=SDLK_BACKQUOTE;break;
-    case SDL_CONTROLLER_BUTTON_LEFTSHOULDER:key=SDLK_MINUS;break;
-    case SDL_CONTROLLER_BUTTON_RIGHTSHOULDER:key=SDLK_PLUS;break;
-    case SDL_CONTROLLER_BUTTON_Y:key=SDLK_F5;break;
+    case SDL_CONTROLLER_BUTTON_B:key=SDLK_F13;break; /* Hand */
+    case SDL_CONTROLLER_BUTTON_Y:key=SDLK_F14;break; /* Inspect */
+    case SDL_CONTROLLER_BUTTON_X:key=SDLK_F15;break; /* Bulldozer */
     }
     if(key!=SDLK_UNKNOWN) {
         SDL_Event e;SDL_zero(e);e.type=down?SDL_KEYDOWN:SDL_KEYUP;

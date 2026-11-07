@@ -1,7 +1,7 @@
-# ConciliaTower on PS Vita (VitaGL)
+# Concilia Tower on PS Vita (native GXM)
 
 This tree can be built as a PS Vita `.vpk` using VitaSDK and **sdl2_vitagl**
-(SDL2 with the vitaGL video backend).
+(SDL2 Vita backend); the game selects the native GXM renderer, not vitaGL.
 
 The VPK is the engine only. It does **not** ship `SIMTOWER.EXE`, CD images,
 or any other Maxis assets, and it does **not** ship `libshacccg.suprx`.
@@ -35,7 +35,12 @@ Or: `make vita` (same steps).
 3. If the EXE is missing, the app shows an on-screen path reminder and waits
    for START/Circle rather than silently exiting.
 
-Saves go to `ux0:data/concilia-tower/concilliatower.sav`.
+The default save remains `ux0:data/concilia-tower/concilliatower.sav`.
+Game > Save As offers numbered `tower-01.sav` ... `tower-16.sav` slots and
+existing `.sav` files; Game > Load lists that same userdata folder. Save uses
+the selected slot for the session. Autosave/exports also stay in userdata.
+`--save`, `CT_SAVE`, cwd and `app0:` cannot redirect Vita saves.
+Save/load paths and results are flushed to `ux0:data/concilia-tower/boot.log`.
 
 Native `.sav` files are architecture-specific (the Vita build is 32-bit, so
 they are not interchangeable with desktop 64-bit saves). Use original
@@ -46,27 +51,25 @@ builds, and SimTower 1.1.
 
 | Vita | Action |
 | --- | --- |
-| Front touch | Mouse (click to build / UI) |
-| Left analog | Pan camera |
-| Right analog | Pan camera (faster) |
-| D-pad | Pan camera |
-| Cross | Confirm / Enter |
-| Circle | Cancel / Esc |
-| Start | Pause (Space) |
+| Front touch | Move pointer; tap/click and drag |
+| Left analog | Camera |
+| Right analog | Visible mouse cursor |
+| D-pad | Fine cursor nudge |
+| Cross / R trigger | Left click / hold to drag (combined safely with touch) |
+| L trigger | Right click / camera drag |
+| Circle | Select Hand / pointer tool |
+| Triangle | Select Inspect / magnifying glass tool |
+| Square | Select Bulldozer tool |
+| Start | Game menu |
 | Select | Debug labels |
-| L / R | Simulation speed down / up |
-| Triangle | Quick-save (F5) |
 
-## Runtime notes (vitaGL shaders)
+## Runtime notes (native GXM)
 
-sdl2_vitagl / vitaShaRK compile shaders at runtime. On a real Vita or an
-emulator this typically needs `libshacccg.suprx` installed in the console's
-system data (commonly `ur0:data/libshacccg.suprx` or
-`ur0:data/external/libshacccg.suprx`), plus taiHEN on hardware.
-
-That module is **not** part of this project and must never be committed or
-packed into the VPK. Install it separately if your device/emulator does not
-already have it.
+Since v0.5 the renderer uses native GXM with precompiled shaders. It does not
+initialize vitaGL or need `libshacccg.suprx`. The SDK still links sdl2_vitagl,
+but this game uses only SDL's renderer API and chooses its native GXM driver.
+A homebrew-capable console is required. Do not include the Sony compiler or
+SimTower assets in the VPK or repository.
 
 ## Legal
 
@@ -384,3 +387,32 @@ LRU eviction, retained-reference safety and cleanup. These are host tests, not
 a claim of real-Vita 60 fps. Prior real-EXE sprite/tiling regressions still pass.
 Release: `ConciliaTower-v0.7.vpk`, APP_VER 00.07; same indexed artwork, spaced
 menu title, no proprietary EXE/resource files or shader compiler in package.
+
+
+## v0.8: 1.5x world zoom, tool shortcuts and rooted save slots (APP_VER 00.08)
+
+- World-only 3:2 nearest zoom: render into a reusable 640x364 GPU target,
+  upscale to 960x546 and crop one output row at top/bottom. UI, Map and pointer
+  stay at 960x544. Adjacent/tiled sprites are composed before the single upscale,
+  avoiding per-sprite fractional phases/seams and per-frame CPU uploads.
+- Picking, person hits, camera clamp, right-click camera drag and minimap
+  viewport use the zoom transform. Tenant preview windows retain native scale.
+  Target support is checked at startup; unsupported targets fall back to 1x
+  coherently and log the reason, while later bind failures display an error.
+- Buttons use the table above. Cross/R/touch form a single held left-button
+  state, avoiding early mouse-up during combined input. Tool buttons use the
+  same selection function as the Tools window so its highlight stays correct.
+- Save/Save As/Load and both export formats use writable userdata only.
+  Save As and Load show the folder path and existing .sav files. A safe basename
+  policy prevents traversal/absolute overrides; directory creation and all
+  native save/load paths/results are logged. Existing atomic temporary-write
+  and three backup generations remain intact. Save slots are session-selected;
+  startup still auto-loads the original default filename.
+- Host sanitizer tests cover the controller changes, safe save paths/listing,
+  actual save/load roundtrip (money, clock, tuning, backup generation), nearest
+  world composition against a raw SDL reference with forced 127px tiles,
+  negative/positive camera inverse transforms, and unchanged UI dimensions.
+  The full simulation suite has four existing shaft-cap fixture failures,
+  reproduced byte-for-byte with the unchanged v0.7 game.c; no new failures.
+- Release filename: `ConciliaTower-v0.8.vpk`; PNGs remain 8-bit indexed. Hardware
+  confirmation is still needed for zoom sampling/picking, new buttons and saves.

@@ -26,6 +26,7 @@ void vita_prepare_userdata(void);
 void vita_try_expand_ex_(void);
 void vita_init_runtime(void);
 const char *vita_save_path(void);
+int vita_set_save_name(const char *name);
 
 void vita_input_hints(void);
 void vita_input_event(const SDL_Event *,CT_InputSink);

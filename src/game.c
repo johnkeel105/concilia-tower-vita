@@ -1,3 +1,9 @@
+#ifdef __vita__
+#include "vita_platform.h"
+#include "save_store.h"
+#include <errno.h>
+#include <psp2/io/fcntl.h>
+#endif
 /* game.c - Simulation engine
  *
  * The beating heart: time flows, tenants work, money moves, stars are earned.
@@ -4192,7 +4198,7 @@ void game_update_santa(GameSim *sim)
                            * v2: hotel condition/demand fields in Tenant,
                              hotel_pass_day in GameSim */
 
-int game_save(const GameSim *sim, const Tower *tower, const char *path)
+static int game_save_impl(const GameSim *sim, const Tower *tower, const char *path)
 {
     /* Write to a temp file first, then rotate generations and rename into
      * place — a crash mid-write can never truncate the only good save,
@@ -4356,7 +4362,7 @@ const char *ct_sav_to_tdt(const char *sav_path)
 }
 #endif
 
-int game_load(GameSim *sim, Tower *tower, const char *path)
+static int game_load_impl(GameSim *sim, Tower *tower, const char *path)
 {
     FILE *f = fopen(path, "rb");
     if (!f) return -1;
@@ -4490,4 +4496,32 @@ int game_load(GameSim *sim, Tower *tower, const char *path)
                  t->type == ITEM_SHOP) ? 10 : 0;
         }
     return ok ? 0 : -1;
+}
+
+int game_save(const GameSim *sim,const Tower *tower,const char *path)
+{
+#ifdef __vita__
+    if(!CT_SavePathWithin(CT_VITA_SAVE_DIR,path) || CT_SaveDirectoryCreate(CT_VITA_SAVE_DIR)<0) {
+        vita_boot_log("SAVE refused unsafe/unwritable path=%s",path?path:"(null)");return -1;
+    }
+    vita_boot_log("SAVE begin path=%s",path);errno=0;
+#endif
+    int rc=game_save_impl(sim,tower,path);
+#ifdef __vita__
+    int error=errno;int sync=rc==0?sceIoSync("ux0:",0):0;
+    vita_boot_log("SAVE done path=%s result=%d errno=%d sync=0x%x",path,rc,error,sync);
+#endif
+    return rc;
+}
+int game_load(GameSim *sim,Tower *tower,const char *path)
+{
+#ifdef __vita__
+    if(!CT_SavePathWithin(CT_VITA_SAVE_DIR,path)) { vita_boot_log("LOAD refused unsafe path=%s",path?path:"(null)");return -1; }
+    vita_boot_log("LOAD begin path=%s",path);errno=0;
+#endif
+    int rc=game_load_impl(sim,tower,path);
+#ifdef __vita__
+    vita_boot_log("LOAD done path=%s result=%d errno=%d",path,rc,errno);
+#endif
+    return rc;
 }

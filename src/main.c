@@ -18,6 +18,8 @@
 #include "exe_prepare.h"
 #include "sprites.h"
 #include "text_cache.h"
+#include "world_view.h"
+#include "save_store.h"
 #include "tower.h"
 #include "game.h"
 #ifdef __EMSCRIPTEN__
@@ -617,6 +619,7 @@ typedef struct {
 #define ACT_MODE_CAMPAIGN 9
 #define ACT_MODE_SANDBOX  10
 #define ACT_FINANCE       11
+#define ACT_SAVE_AS       32
 #define ACT_SAVE          12
 #define ACT_LOAD          13
 #define ACT_EXPORT_TDT    14
@@ -721,6 +724,9 @@ static const MenuItem menu_file[] = {
     { "New Tower",         ITEM_NONE,  ACT_NEW_TOWER },
     { NULL, ITEM_NONE, ACT_NONE },     /* separator */
     { "Save\tF5",          ITEM_NONE,  ACT_SAVE },
+#ifdef __vita__
+    { "Save As...",         ITEM_NONE,  ACT_SAVE_AS },
+#endif
     { "Load\tF9",          ITEM_NONE,  ACT_LOAD },
     { "Export .TDT\tF6",   ITEM_NONE,  ACT_EXPORT_TDT },
     { "Export .sav",       ITEM_NONE,  ACT_EXPORT_SAV },
@@ -838,12 +844,20 @@ static const CloudPos CLOUD_POSITIONS[] = {
 };
 #define CLOUD_COUNT (int)(sizeof(CLOUD_POSITIONS)/sizeof(CLOUD_POSITIONS[0]))
 
+#ifdef __vita__
+static CT_WorldView world_view;
+static int world_native_pass;
+#endif
+
 /* ---------- Coordinate conversion ---------- */
 
 static void screen_to_grid(int sx, int sy, int *floor, int *cell)
 {
     int world_x = sx + (int)game.cam_fx - game.screen_w / 2;
     int world_y = sy + (int)game.cam_fy - game.screen_h / 2;
+#ifdef __vita__
+    if(!world_native_pass) CT_ViewWorldPoint(&world_view,sx,sy,(int)game.cam_fx,(int)game.cam_fy,&world_x,&world_y);
+#endif
 
     /* True floor-division by CELL_H. Plain integer division truncates toward
      * zero, which picks the wrong floor (off by one) above ground where
@@ -865,6 +879,9 @@ static void grid_to_screen(int floor, int cell, int *sx, int *sy)
 
     *sx = world_x - (int)game.cam_fx + game.screen_w / 2;
     *sy = world_y - (int)game.cam_fy + game.screen_h / 2;
+#ifdef __vita__
+    if(!world_native_pass) CT_ViewScreenPoint(&world_view,world_x,world_y,(int)game.cam_fx,(int)game.cam_fy,sx,sy);
+#endif
 }
 
 /* Shared ambient occupancy gate (ambient-gates referee 2026-08-09, SoundT
@@ -979,6 +996,9 @@ static void ambient_tick(void)
 static void clamp_camera(void)
 {
     float half = game.screen_h / 2.0f;
+#ifdef __vita__
+    if(!world_native_pass) half=CT_ViewHalfHeight(&world_view);
+#endif
     /* Bottom: one row PAST B10's lower edge — pit machinery draws a row
      * below a shaft's last segment, and a legacy B10-reaching shaft
      * (possible before the B9 extend gate, 2026-08-12) needs its pit
@@ -992,6 +1012,9 @@ static void clamp_camera(void)
 
     /* Horizontal: keep at least part of the tower's width on screen. */
     float halfw = game.screen_w / 2.0f;
+#ifdef __vita__
+    if(!world_native_pass) halfw=CT_ViewHalfWidth(&world_view);
+#endif
     float right = (float)(TOWER_WIDTH * CELL_W) - halfw;
     float left  = halfw;
     if (left > right) left = right;
@@ -4488,12 +4511,23 @@ static int  event_msg_total = 0;
  * the cwd default. The argv form exists because the browser shell picks
  * the slot at Start-click time — after the wasm runtime has already
  * snapshotted ENV, so an env var can no longer carry it. */
+#ifdef __vita__
+static int save_dialog_mode,save_dialog_page,save_dialog_count;
+static char save_dialog_names[96][CT_SAVE_NAME_MAX];
+static void open_save_dialog(int mode);
+static void render_save_dialog(void);
+static void save_dialog_event(SDL_Event *ev);
+#endif
 static const char *save_path_override = NULL;
 static const char *save_path(void)
 {
+#ifdef __vita__
+    return vita_save_path(); /* Never honor cwd/env/--save overrides on Vita. */
+#else
     if (save_path_override && *save_path_override) return save_path_override;
     const char *env = getenv("CT_SAVE");
     return env && *env ? env : "concilliatower.sav";
+#endif
 }
 
 /* Web build: flush MEMFS writes down to IndexedDB after a save lands —
@@ -4944,7 +4978,11 @@ static void render_minimap(void)
      * santa.x is screen-space, so convert to world; his altitude is the
      * fixed 0x84c px above ground minus the descent. */
     if (game.sim.santa.active) {
-        int wx_px = game.sim.santa.x + (int)game.cam_fx - game.screen_w / 2
+        int santa_view_w=game.screen_w;
+#ifdef __vita__
+        santa_view_w=world_view.world_w;
+#endif
+        int wx_px = game.sim.santa.x + (int)game.cam_fx - santa_view_w / 2
                     + (game.santa ? game.santa->w / 2 : 0);
         int cell = wx_px / CELL_W;
         if (cell >= 0 && cell < TOWER_WIDTH) {
@@ -7266,9 +7304,15 @@ static void draw_tenant_picture(const Tenant *t, SDL_Rect box)
         float sx = game.cam_fx, sy = game.cam_fy;
         game.cam_fx = (float)(wx0 + game.screen_w / 2);
         game.cam_fy = (float)(wy0 + game.screen_h / 2);
+#ifdef __vita__
+        int old_native=world_native_pass;world_native_pass=1;
+#endif
         render_sky();
         render_tower();
         render_people();
+#ifdef __vita__
+        world_native_pass=old_native;
+#endif
         game.cam_fx = sx; game.cam_fy = sy;
         CT_SetRenderTarget(game.renderer, NULL);
     }
@@ -7497,7 +7541,7 @@ static void person_where_line(const Person *p, char *buf, int bufn)
  * queue layout (the EXE walks the same draw cells: exact 8px column, no
  * radius; only queue-standing people are world-clickable, car riders go
  * through the elevator dialog). Returns people[] slot + 1, or 0. */
-static uint16_t person_hit_test(int mx, int my)
+static uint16_t person_hit_test_native(int mx, int my)
 {
     if (!game.anim_people) return 0;   /* hidden crowd isn't clickable */
     PeopleSim *ps = &game.sim.people;
@@ -7536,6 +7580,20 @@ static uint16_t person_hit_test(int mx, int my)
         }
     }
     return 0;
+}
+
+static uint16_t person_hit_test(int mx,int my)
+{
+#ifdef __vita__
+    int x,y;CT_ViewSourcePoint(&world_view,mx,my,&x,&y);
+    int old_w=game.screen_w,old_h=game.screen_h,old_native=world_native_pass;
+    game.screen_w=world_view.world_w;game.screen_h=world_view.world_h;world_native_pass=1;
+    uint16_t pid=person_hit_test_native(x,y);
+    game.screen_w=old_w;game.screen_h=old_h;world_native_pass=old_native;
+    return pid;
+#else
+    return person_hit_test_native(mx,my);
+#endif
 }
 
 #define PINFO_W 236
@@ -8307,6 +8365,17 @@ static void render(void)
     SDL_SetRenderDrawColor(game.renderer, 0, 0, 0, 255);
     SDL_RenderClear(game.renderer);
 
+#ifdef __vita__
+    int world_was_bound=world_view.target && CT_WorldViewBegin(&world_view,game.renderer)==0;
+    if(world_view.target && !world_was_bound) {
+        CT_BOOT("world canvas bind failed: %s",SDL_GetError());
+        vita_boot_fatal("Cannot bind world zoom canvas; see boot.log.");return;
+    }
+    if(world_was_bound) {
+        game.screen_w=world_view.world_w;game.screen_h=world_view.world_h;world_native_pass=1;
+        SDL_SetRenderDrawColor(game.renderer,0,0,0,255);SDL_RenderClear(game.renderer);
+    }
+#endif
     render_sky();
     if (game.elv_edit_mode) {
         render_elv_edit_mode();   /* silhouette tower + isolated shaft */
@@ -8337,6 +8406,10 @@ static void render(void)
         render_build_ghost();
     }
 #ifdef __vita__
+    if(world_was_bound) {
+        game.screen_w=world_view.screen_w;game.screen_h=world_view.screen_h;world_native_pass=0;
+        if(CT_WorldViewEnd(&world_view,game.renderer)<0) CT_BOOT("world canvas present failed: %s",SDL_GetError());
+    }
     if (first_frame) {
         CT_BOOT("first gameplay world draw complete; UI begins");
         vita_boot_watch_stage("first gameplay UI drawing");
@@ -8360,6 +8433,9 @@ static void render(void)
     render_notice_modal();     /* resolution/VIP notices, same layer */
     render_route_confirm();    /* likewise */
     render_quit_confirm();     /* topmost — quitting outranks all */
+#ifdef __vita__
+    render_save_dialog();
+#endif
 
 #ifdef __vita__
     if (first_frame) {
@@ -8556,6 +8632,20 @@ static void drag_place_units(void)
     }
 }
 
+/* Shared by Toolbox clicks and Vita hotkeys; the flags drive the existing
+ * pressed/highlight rendering. Hotkeys select (not toggle) their tool. */
+static void select_action_tool(int tool,int toggle)
+{
+    int active=tool==0?game.demolish_mode:tool==1?game.finger_mode:game.inspect_mode;
+    int on=toggle?!active:1;
+    game.demolish_mode=tool==0 && on;
+    game.finger_mode=tool==1 && on;
+    game.inspect_mode=tool==2 && on;
+    game.build_type=ITEM_NONE;game.tool_popup=-1;
+    game.dragging=game.cap_drag=0;audio_stop_loop();
+    CT_BOOT("Tool selected: %s state=%d",tool==0?"Bulldozer":tool==1?"Hand":"Inspect",on);
+}
+
 /* ---------- Toolbox click helper ---------- */
 static int toolbox_click(int mx, int my)
 {
@@ -8582,30 +8672,7 @@ static int toolbox_click(int mx, int my)
             for (int t = 0; t < 3; t++) {
                 int bxt = tx + t * 23;
                 if (mx >= bxt && mx < bxt + 21) {
-                    if (t == 0) {                 /* Bulldozer: toggle demolish mode */
-                        game.demolish_mode = !game.demolish_mode;
-                        if (game.demolish_mode) {
-                            game.tool_popup = -1;
-                            game.finger_mode = game.inspect_mode = 0;
-                        }
-                        printf("Bulldozer %s\n", game.demolish_mode ? "ON" : "off");
-                    } else if (t == 1) {          /* Finger/pointer: interact mode */
-                        game.finger_mode = !game.finger_mode;
-                        game.demolish_mode = game.inspect_mode = 0;
-                        if (game.finger_mode) {
-                            game.build_type = ITEM_NONE;
-                            game.tool_popup = -1;
-                        }
-                        printf("Finger tool %s\n", game.finger_mode ? "ON" : "off");
-                    } else {                      /* Inspector: click a unit for info */
-                        game.inspect_mode = !game.inspect_mode;
-                        game.demolish_mode = game.finger_mode = 0;
-                        if (game.inspect_mode) {
-                            game.build_type = ITEM_NONE;
-                            game.tool_popup = -1;
-                        }
-                        printf("Inspector %s\n", game.inspect_mode ? "ON" : "off");
-                    }
+                    select_action_tool(t,1);
                     return 1;
                 }
             }
@@ -8897,11 +8964,77 @@ static void do_load_game(void)
     }
 }
 
+#ifdef __vita__
+/* The Vita has no desktop chooser. All rows stay in the writable data folder;
+ * Save As adds safe numbered slots, while Load lists existing .sav files only. */
+static SDL_Rect save_dialog_rect(void) { return (SDL_Rect){260,82,440,380}; }
+static void open_save_dialog(int mode)
+{
+    CT_SaveDirectoryCreate(CT_VITA_SAVE_DIR);
+    save_dialog_count=CT_SaveList(CT_VITA_SAVE_DIR,save_dialog_names,96);
+    if(save_dialog_count<0) save_dialog_count=0;
+    if(mode==1) for(int i=1;i<=16 && save_dialog_count<96;i++) {
+        char name[CT_SAVE_NAME_MAX];snprintf(name,sizeof(name),"tower-%02d.sav",i);
+        int present=0;for(int n=0;n<save_dialog_count;n++) if(!strcmp(name,save_dialog_names[n])) present=1;
+        if(!present) strcpy(save_dialog_names[save_dialog_count++],name);
+    }
+    save_dialog_mode=mode;save_dialog_page=0;game.menu_open=-1;
+    game.dragging=game.cap_drag=0;audio_stop_loop();
+    CT_BOOT("%s chooser directory=%s entries=%d",mode==1?"SAVE AS":"LOAD",CT_VITA_SAVE_DIR,save_dialog_count);
+}
+static void render_save_dialog(void)
+{
+    if(!save_dialog_mode) return;
+    SDL_Rect r=save_dialog_rect();draw_win31_rect(r.x,r.y,r.w,r.h,1);
+    SDL_Color black={0,0,0,255};
+    draw_text(save_dialog_mode==1?"Save As - choose a slot":"Load - choose a save",r.x+14,r.y+12,black);
+    stats_label(r.x+14,r.y+42,CT_VITA_SAVE_DIR "/",black);
+    for(int row=0;row<8;row++) {
+        int i=save_dialog_page*8+row;if(i>=save_dialog_count) break;
+        SDL_Rect b={r.x+14,r.y+72+row*29,r.w-28,26};
+        draw_win31_rect(b.x,b.y,b.w,b.h,1);stats_label(b.x+8,b.y+5,save_dialog_names[i],black);
+    }
+    if(!save_dialog_count) stats_label(r.x+16,r.y+92,"No saves found in this folder.",black);
+    stats_label(r.x+14,r.y+309,"Existing saves keep backup generations.",black);
+    draw_win31_rect(r.x+14,r.y+338,76,26,1);stats_label(r.x+24,r.y+344,"Previous",black);
+    draw_win31_rect(r.x+104,r.y+338,64,26,1);stats_label(r.x+119,r.y+344,"Next",black);
+    draw_win31_rect(r.x+r.w-94,r.y+338,80,26,1);stats_label(r.x+r.w-81,r.y+344,"Cancel",black);
+}
+static void save_dialog_event(SDL_Event *ev)
+{
+    if(ev->type==SDL_QUIT) { game.running=0;return; }
+    if(ev->type==SDL_KEYDOWN && (ev->key.keysym.sym==SDLK_ESCAPE || ev->key.keysym.sym==SDLK_F10)) { save_dialog_mode=0;return; }
+    if(ev->type!=SDL_MOUSEBUTTONDOWN || ev->button.button!=SDL_BUTTON_LEFT) return;
+    SDL_Rect r=save_dialog_rect();int x=ev->button.x,y=ev->button.y;
+    if(point_in_rect(x,y,(SDL_Rect){r.x+r.w-94,r.y+338,80,26})) { save_dialog_mode=0;return; }
+    if(point_in_rect(x,y,(SDL_Rect){r.x+14,r.y+338,76,26})) { if(save_dialog_page) save_dialog_page--;return; }
+    if(point_in_rect(x,y,(SDL_Rect){r.x+104,r.y+338,64,26})) {
+        if((save_dialog_page+1)*8<save_dialog_count) save_dialog_page++;
+        return;
+    }
+    for(int row=0;row<8;row++) {
+        int i=save_dialog_page*8+row;if(i>=save_dialog_count) break;
+        if(point_in_rect(x,y,(SDL_Rect){r.x+14,r.y+72+row*29,r.w-28,26})) {
+            int mode=save_dialog_mode;
+            if(vita_set_save_name(save_dialog_names[i])<0) { CT_BOOT("Chooser rejected unsafe filename");return; }
+            save_dialog_mode=0;if(mode==1) do_save_game();else do_load_game();return;
+        }
+    }
+}
+#endif
+
 static void do_export_tdt(void)
 {
     char terr[128];
-    if (twr_export("ct_export.tdt", &game.tower, &game.sim,
+#ifdef __vita__
+    const char *tdt_path=CT_VITA_SAVE_DIR "/ct_export.tdt";
+#else
+    const char *tdt_path="ct_export.tdt";
+#endif
+    CT_BOOT("TDT export begin path=%s",tdt_path);
+    if (twr_export(tdt_path, &game.tower, &game.sim,
                    terr, sizeof terr) == 0) {
+        CT_BOOT("TDT export done path=%s result=0",tdt_path);
         add_event_message("Exported ct_export.tdt (original format).");
 #ifdef __EMSCRIPTEN__
         /* Hand the file to the browser as a download — MEMFS is not a
@@ -8922,6 +9055,7 @@ static void do_export_tdt(void)
             add_event_message(buf);
         }
     } else {
+        CT_BOOT("TDT export failed path=%s error=%s",tdt_path,terr);
         add_event_message("TDT export FAILED!");
         printf("TDT export: %s\n", terr);
     }
@@ -8932,7 +9066,12 @@ static void do_export_tdt(void)
  * download. Jonah 2026-08-17: both formats belong in the menu. */
 static void do_export_sav(void)
 {
-    if (game_save(&game.sim, &game.tower, "ct_export.sav") == 0) {
+#ifdef __vita__
+    const char *sav_path=CT_VITA_SAVE_DIR "/ct_export.sav";
+#else
+    const char *sav_path="ct_export.sav";
+#endif
+    if (game_save(&game.sim, &game.tower, sav_path) == 0) {
         add_event_message("Exported ct_export.sav (web-save format).");
 #ifdef __EMSCRIPTEN__
         EM_ASM({ if (window.ctDownloadFile)
@@ -9019,7 +9158,20 @@ static void execute_menu_item(const MenuItem *item)
         break;
     case ACT_FINANCE: toggle_fin_dialog(); break;
     case ACT_SAVE:       do_save_game();  break;
-    case ACT_LOAD:       do_load_game();  break;
+    case ACT_SAVE_AS:
+#ifdef __vita__
+        open_save_dialog(1);
+#else
+        do_save_game();
+#endif
+        break;
+    case ACT_LOAD:
+#ifdef __vita__
+        open_save_dialog(2);
+#else
+        do_load_game();
+#endif
+        break;
     case ACT_EXPORT_TDT: do_export_tdt(); break;
     case ACT_EXPORT_SAV: do_export_sav(); break;
     case ACT_STATS:  game.show_stats  = !game.show_stats;  break;
@@ -9185,6 +9337,9 @@ static void handle_event(SDL_Event *ev)
         audio_stop_loop();
     }
 #endif
+#ifdef __vita__
+    if(save_dialog_mode) { save_dialog_event(ev);return; }
+#endif
     /* Quit save-prompt: fully modal, topmost. */
     if (game.quit_confirm) {
         switch (ev->type) {
@@ -9306,6 +9461,9 @@ static void handle_event(SDL_Event *ev)
         
     case SDL_KEYDOWN:
         switch (ev->key.keysym.sym) {
+        case SDLK_F13: select_action_tool(1,0); break;
+        case SDLK_F14: select_action_tool(2,0); break;
+        case SDLK_F15: select_action_tool(0,0); break;
         case SDLK_F10:
             game.menu_open=game.menu_open>=0?-1:0;
             game.menu_hover=-1;
@@ -9392,7 +9550,11 @@ static void handle_event(SDL_Event *ev)
             toggle_fin_dialog();
             break;
         case SDLK_F9:
+#ifdef __vita__
+            open_save_dialog(2);
+#else
             do_load_game();
+#endif
             break;
 
         case SDLK_F8:   /* Toggle Campaign (star-gated) / Sandbox (all unlocked) */
@@ -9497,8 +9659,11 @@ static void handle_event(SDL_Event *ev)
         if (game.cam_panning) {
             int dx = ev->motion.x - game.cam_pan_last_x;
             int dy = ev->motion.y - game.cam_pan_last_y;
-            game.cam_fx -= dx;
-            game.cam_fy -= dy;
+#ifdef __vita__
+            game.cam_fx -= dx/world_view.zoom;game.cam_fy -= dy/world_view.zoom;
+#else
+            game.cam_fx -= dx;game.cam_fy -= dy;
+#endif
             game.cam_anim = 0;
             game.cam_pan_last_x = ev->motion.x;
             game.cam_pan_last_y = ev->motion.y;
@@ -10144,8 +10309,8 @@ int main(int argc, char *argv[])
     }
 
 #ifdef __vita__
-    if (!save_path_override)
-        save_path_override = vita_save_path();
+    if(save_path_override || getenv("CT_SAVE")) CT_BOOT("Ignoring --save/CT_SAVE: Vita saves are restricted to %s",CT_VITA_SAVE_DIR);
+    save_path_override = vita_save_path();
 #endif
     
     if (!exe_path) {
@@ -10329,6 +10494,12 @@ int main(int argc, char *argv[])
 
 #ifdef __vita__
     SDL_RenderSetLogicalSize(game.renderer,960,544);
+    CT_WorldViewInit(&world_view,960,544,1.5f);
+    if(CT_WorldViewCreate(&world_view,game.renderer)<0) {
+        CT_BOOT("world zoom target unavailable: %s; using coherent 1x fallback",SDL_GetError());
+        CT_WorldViewInit(&world_view,960,544,1.0f);
+    }
+    CT_BOOT("world zoom=%.2f source=%dx%d output=%dx%d offset=%d,%d UI=960x544 nearest",world_view.zoom,world_view.world_w,world_view.world_h,world_view.dst.w,world_view.dst.h,world_view.dst.x,world_view.dst.y);
     SDL_ShowCursor(SDL_DISABLE); /* Native backend has no usable system cursor. */
 #else
     /* Replace the bare X-server root cursor with a proper arrow; the bulldozer
@@ -11303,7 +11474,11 @@ int main(int argc, char *argv[])
                           exe_dlg_text((uint16_t)(0xBD6 + st - 2), 1, "OK"));
     }
     (void)show_underground;
-    game.zoom = 1.0f;
+#ifdef __vita__
+    game.zoom=world_view.zoom;
+#else
+    game.zoom=1.0f;
+#endif
     
     printf("\n=== ConciliaTower running ===\n");
     printf("Controls:\n");
@@ -11321,7 +11496,7 @@ int main(int argc, char *argv[])
     printf("  ` (backtick): toggle debug labels, F12: screenshot, Q: quit (Esc closes windows)\n");
 #ifdef __vita__
     printf("  Vita: left stick=camera, right stick=cursor, D-pad=fine cursor, front touch=tap/drag\n");
-    printf("        Cross=left click/drag, Circle=right click, Start=menu, L/R=speed, Triangle=save\n");
+    printf("        Cross/R=left click/drag, L=right click, Circle=Hand, Triangle=Inspect, Square=Bulldozer, Start=menu\n");
 #endif
     printf("\n");
     
@@ -11422,7 +11597,11 @@ int main(int argc, char *argv[])
          * (1258:0244-02d8) and entering the mode clears it (10f0:007b) —
          * gating here also keeps the paused-path transport rebuild from
          * clobbering the mode's isolated shaft flags. */
-        if (!game.find_open && !game.elv_edit_mode) {
+        if (!game.find_open && !game.elv_edit_mode
+#ifdef __vita__
+            && !save_dialog_mode
+#endif
+        ) {
             int prev_hour = game.sim.hour;
             int prev_star = game.tower.star_rating;
             int prev_pop = game.tower.population;

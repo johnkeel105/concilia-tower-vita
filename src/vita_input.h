@@ -6,7 +6,7 @@
 typedef void (*CT_InputSink)(SDL_Event *);
 typedef struct {
     float x,y,hold,nudge_hold;
-    int w,h,last_x,last_y,visible,cross,circle,touch,focused;
+    int w,h,last_x,last_y,visible,cross,rtrigger,secondary,touch,focused;
     unsigned dpad,last_click_ms,last_click_count;
     int click_x,click_y;
     SDL_TouchID front;
