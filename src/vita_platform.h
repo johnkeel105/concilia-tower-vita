@@ -12,6 +12,8 @@ extern "C" {
 #endif
 
 void vita_boot_begin(void);
+void vita_boot_watch_stage(const char *stage);
+int vita_gl_validate_context(void);
 void vita_boot_notice(const char *message);
 void vita_boot_notice_end(void);
 void vita_boot_log(const char *fmt, ...) __attribute__((format(printf, 1, 2)));

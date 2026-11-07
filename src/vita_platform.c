@@ -8,7 +8,9 @@
 #include <stdarg.h>
 #include <errno.h>
 #include <stdint.h>
+#include <stdatomic.h>
 #include <psp2/ctrl.h>
+#include <psp2/display.h>
 #include <psp2/kernel/threadmgr.h>
 #include <psp2/kernel/sysmem.h>
 #include <psp2/kernel/processmgr.h>
@@ -31,6 +33,60 @@ unsigned int _newlib_heap_size_user = 192 * 1024 * 1024;
 static char search_report[4096];
 static int log_writable;
 static int debug_screen_active;
+static SceDisplayFrameBuf error_frame;
+static int error_frame_reserved;
+static _Atomic(const char *) watched_stage;
+static atomic_uint watched_since;
+static atomic_uint watched_generation;
+static atomic_int watchdog_finished;
+
+/* Stages are static string literals. The watchdog never touches SDL/GL or
+ * cancels the render thread: a timeout is evidence, not a safe recovery point. */
+void vita_boot_watch_stage(const char *stage)
+{
+    if (stage && watchdog_finished) return;
+    if (!stage) watchdog_finished = 1;
+    watched_since = sceKernelGetProcessTimeLow();
+    watched_stage = stage;
+    atomic_fetch_add(&watched_generation, 1);
+}
+
+static int boot_watchdog(SceSize args, void *argp)
+{
+    unsigned generation = 0;
+    SceUInt32 last_report = 0;
+    for (;;) {
+        sceKernelDelayThread(1000000);
+        if (watchdog_finished) return sceKernelExitDeleteThread(0);
+        unsigned current = watched_generation;
+        const char *stage = watched_stage;
+        SceUInt32 now = sceKernelGetProcessTimeLow();
+        SceUInt32 elapsed = now - watched_since;
+        if (current != watched_generation) continue;
+        if (current != generation) { generation = current; last_report = now; }
+        if (stage && elapsed >= 60000000U && now - last_report >= 30000000U) {
+            vita_boot_log("WATCHDOG TIMEOUT: no stage completion for %u seconds: %s (diagnostic only; no forced reset)", elapsed / 1000000U, stage);
+            last_report = now;
+        }
+    }
+    return 0;
+}
+
+/* Allocate the shader-independent error display BEFORE vitaGL takes pools.
+ * Keep it reserved, hidden behind SDL's framebuffer during normal rendering. */
+static void reserve_error_frame(void)
+{
+    if (error_frame_reserved) return;
+    int rc = debug_screen_active ? 0 : psvDebugScreenInit();
+    debug_screen_active = rc >= 0;
+    memset(&error_frame, 0, sizeof(error_frame));
+    error_frame.size = sizeof(error_frame);
+    if (rc >= 0) {
+        rc = sceDisplayGetFrameBuf(&error_frame, SCE_DISPLAY_SETBUF_NEXTFRAME);
+        error_frame_reserved = rc >= 0 && error_frame.base != NULL;
+    }
+    vita_boot_log("reserved 2 MiB direct error framebuffer before GL: result=0x%08x ready=%d", rc, error_frame_reserved);
+}
 
 void vita_boot_log(const char *fmt, ...)
 {
@@ -64,7 +120,7 @@ void vita_boot_begin(void)
     /* Keep last run available even if the new run fails very early. */
     sceIoRemove(CT_DATA_DIR "/boot.previous.log");
     sceIoRename(CT_DATA_DIR "/boot.log", CT_DATA_DIR "/boot.previous.log");
-    vita_boot_log("ConciliaTower v0.3 APP_VER=00.03 build=%s: app start", CT_BUILD_VERSION);
+    vita_boot_log("ConciliaTower v0.4 APP_VER=00.04 build=%s: app start", CT_BUILD_VERSION);
     vita_boot_log("kernel process clock available; mkdir ux0:data=0x%08x data dir=0x%08x; log writable=%d",
                   data_rc, dir_rc, log_writable);
     vita_boot_log("newlib heap=%u MiB; startup diagnostics use no SDL/GL", _newlib_heap_size_user >> 20);
@@ -73,6 +129,12 @@ void vita_boot_begin(void)
     SDL_LogSetAllPriority(SDL_LOG_PRIORITY_INFO);
     vita_boot_log("shader-library preflight follows (presence is not proof the module can load)");
     vita_shader_library_present();
+    reserve_error_frame();
+    SceUID watchdog = sceKernelCreateThread("ct_boot_watchdog", boot_watchdog,
+                                           0x10000100, 64 * 1024, 0, 0, NULL);
+    int rc = watchdog < 0 ? watchdog : sceKernelStartThread(watchdog, 0, NULL);
+    vita_boot_log("boot watchdog start=0x%08x (60s stage timeout, then every 30s)", rc);
+    vita_boot_watch_stage("EXE detection / expansion / resource parse");
 }
 
 void vita_boost_clocks(void)
@@ -223,33 +285,45 @@ void vita_pan_camera(float *cam_fx, float *cam_fy)
 void vita_boot_notice(const char *message)
 {
     vita_boot_log("%s", message);
-    if (!debug_screen_active) debug_screen_active = psvDebugScreenInit() >= 0;
+    reserve_error_frame();
+    if (error_frame_reserved) sceDisplaySetFrameBuf(&error_frame, SCE_DISPLAY_SETBUF_NEXTFRAME);
     if (debug_screen_active)
-        psvDebugScreenPrintf("\e[2J\e[1;1HConciliaTower v0.3\n\n%s\n\nLog: ux0:data/concilia-tower/boot.log\n", message);
+        psvDebugScreenPrintf("\e[2J\e[1;1HConciliaTower v0.4\n\n%s\n\nLog: ux0:data/concilia-tower/boot.log\n", message);
 }
 
 void vita_boot_notice_end(void)
 {
-    if (debug_screen_active) psvDebugScreenFinish();
-    debug_screen_active = 0;
+    /* Do NOT free: fatal notices must work after vitaGL owns the other pools.
+     * SDL's first frame will replace this framebuffer. No GL initialization here. */
+    vita_boot_log("progress screen hidden for SDL; error framebuffer remains reserved");
 }
 
 int vita_boot_fatal(const char *reason)
 {
     char error[512];
     snprintf(error, sizeof(error), "%s", SDL_GetError());
-    vita_boot_log("FATAL: %s; SDL_GetError=%s", reason, error);
-    int rc = debug_screen_active ? 0 : psvDebugScreenInit();
-    vita_boot_log("direct framebuffer error screen init=0x%08x", rc);
+    vita_boot_watch_stage(NULL);
+    vita_boot_log("FATAL: %s; SDL diagnostic snapshot (may be stale, NOT root cause)=%s", reason, error);
+    if (!error_frame_reserved) reserve_error_frame();
+    int rc = error_frame_reserved ? sceDisplaySetFrameBuf(&error_frame, SCE_DISPLAY_SETBUF_NEXTFRAME) : -1;
+    vita_boot_log("reserved direct framebuffer error screen restore=0x%08x", rc);
     if (rc >= 0) {
-        psvDebugScreenPrintf("\e[2J\e[1;1HConciliaTower v0.3 - startup stopped\n\n%s\nSDL: %s\n\n", reason, error);
+        psvDebugScreenPrintf("\e[2J\e[1;1HConciliaTower v0.4 - startup stopped\n\n%s\nSDL diagnostic (may be stale): %s\n\n", reason, error);
         psvDebugScreenPrintf("Log: ux0:data/concilia-tower/boot.log\nLog writable: %s\n\n", log_writable ? "yes" : "NO - check free space/write access");
         psvDebugScreenPrintf("EXE search (FOUND = detected, not yet validated):\n%s\n", search_report);
         psvDebugScreenPrintf("\nSend boot.log and a photo of this screen.\nRelease buttons, then press START or Circle to exit.\n");
     }
     SceCtrlData pad;
     int released = 0;
+    SceUInt32 wait_start = sceKernelGetProcessTimeLow();
     for (;;) {
+        /* Retake display after any already-queued GL frame retires. This needs
+         * neither a new allocation nor GL/shader calls, even on shader failure. */
+        if (error_frame_reserved) sceDisplaySetFrameBuf(&error_frame, SCE_DISPLAY_SETBUF_NEXTFRAME);
+        if (rc < 0 && sceKernelGetProcessTimeLow() - wait_start >= 30000000U) {
+            vita_boot_log("error display unavailable; leaving invisible failure screen after 30s");
+            break;
+        }
         memset(&pad, 0, sizeof(pad));
         if (sceCtrlPeekBufferPositive(0, &pad, 1) > 0) {
             unsigned mask = SCE_CTRL_START | SCE_CTRL_CIRCLE;
@@ -258,7 +332,7 @@ int vita_boot_fatal(const char *reason)
         }
         sceKernelDelayThread(20000);
     }
-    vita_boot_log("user acknowledged startup failure; exit requested");
+    vita_boot_log("startup failure exit requested (button or unavailable-display timeout)");
     sceKernelExitProcess(1);
     return 1;
 }
@@ -277,25 +351,58 @@ static void log_free_memory(const char *stage)
                   stage, rc, mem.size_user, mem.size_cdram, mem.size_phycont);
 }
 
-/* SDL's installed vitaGL backend ignores vglInitExtended's return value.
- * Interpose the call so a real GL_FALSE does not continue into invalid GL.
- * GL_TRUE is SUCCESS, unlike SDL's zero-success convention. */
+/* Exact installed vitaGL revision: 2bdbe89. Despite the GLboolean signature,
+ * vglInitWithCustomSizes returns res_fallback, NOT an initialization status:
+ * GL_FALSE = requested resolution accepted; GL_TRUE = resolution was clamped.
+ * It also returns GL_FALSE for a suppressed duplicate. Never use it as success.
+ * SDL is the sole initialization owner; this wrapper only observes/configures
+ * its one call. Context/renderer state is validated after SDL creates them. */
 GLboolean __real_vglInitExtended(int, int, int, int, SceGxmMultisampleMode);
+static unsigned gl_init_calls;
+static GLboolean gl_resolution_fallback;
 GLboolean __wrap_vglInitExtended(int pool, int width, int height, int threshold,
                                 SceGxmMultisampleMode msaa)
 {
+    if (gl_init_calls) {
+        vita_boot_log("duplicate SDL vitaGL init request suppressed by port; no second initialization");
+        return gl_resolution_fallback;
+    }
+    gl_init_calls = 1;
+    vita_boot_watch_stage("SDL-owned vitaGL initialization");
     log_free_memory("before vitaGL");
-    vita_boot_log("vitaGL init begin: legacy=%d size=%dx%d RAM threshold=%d MSAA=%d", pool, width, height, threshold, msaa);
-    GLboolean ok = __real_vglInitExtended(pool, width, height, threshold, msaa);
-    vita_boot_log("vitaGL init returned %d (GL_TRUE=%d)", ok, GL_TRUE);
+    /* Threshold is RAM LEFT FREE, not pool size. Preserve 24 MiB of system RAM.
+     * The preallocated error framebuffer already protects 2 MiB of CDRAM. */
+    if (threshold < 24 * 1024 * 1024) threshold = 24 * 1024 * 1024;
+    vglSetCircularPoolSize(4 * 1024 * 1024); /* 2D batch stream, formerly 32 MiB */
+    vita_boot_log("single SDL-owned vitaGL init begin: legacy=%d size=%dx%d free RAM reserve=%d MSAA=%d circular=4 MiB", pool, width, height, threshold, msaa);
+    gl_resolution_fallback = __real_vglInitExtended(pool, width, height, threshold, msaa);
+    vita_boot_log("vitaGL returned resolution_fallback=%d (0=normal resolution; NOT a failure status)", gl_resolution_fallback);
     log_free_memory("after vitaGL");
-    if (ok == GL_FALSE) vita_boot_fatal("vitaGL initialization failed. Check memory and boot.log.");
-    return ok;
+    vita_boot_log("vitaGL pool state: total=%u free=%u bytes; awaiting SDL context/renderer validation",
+                  (unsigned)vglMemTotal(VGL_MEM_ALL), (unsigned)vglMemFree(VGL_MEM_ALL));
+    vita_boot_watch_stage("SDL_CreateWindow completion / context creation");
+    return gl_resolution_fallback;
+}
+
+int vita_gl_validate_context(void)
+{
+    const GLubyte *version = glGetString(GL_VERSION);
+    const GLubyte *renderer = glGetString(GL_RENDERER);
+    const GLubyte *vendor = glGetString(GL_VENDOR);
+    SDL_GLContext context = SDL_GL_GetCurrentContext();
+    size_t pool = vglMemTotal(VGL_MEM_ALL);
+    vita_boot_log("GL actual state: init calls=%u SDL context=%p pool bytes=%u GL_VERSION=%s GL_RENDERER=%s GL_VENDOR=%s",
+                  gl_init_calls, context, (unsigned)pool,
+                  version ? (const char *)version : "(null)",
+                  renderer ? (const char *)renderer : "(null)",
+                  vendor ? (const char *)vendor : "(null)");
+    return gl_init_calls == 1 && context && pool && version && version[0];
 }
 
 /* SDL resolves GL entry points via vglGetProcAddress, not direct linkage. */
 static void diagnostic_compile_shader(GLuint shader)
 {
+    vita_boot_watch_stage("SDL shader compilation");
     vita_boot_log("shader compile begin id=%u", shader);
     glCompileShader(shader);
     GLint ok = GL_FALSE;
@@ -304,10 +411,12 @@ static void diagnostic_compile_shader(GLuint shader)
     glGetShaderInfoLog(shader, sizeof(info), NULL, info);
     vita_boot_log("shader compile done id=%u status=%d info=%s", shader, ok, info);
     if (!ok) vita_boot_fatal("Shader compilation failed. See boot.log compiler output.");
+    vita_boot_watch_stage("SDL renderer construction after shader compilation");
 }
 
 static void diagnostic_link_program(GLuint program)
 {
+    vita_boot_watch_stage("SDL shader program linking");
     vita_boot_log("shader program link begin id=%u", program);
     glLinkProgram(program);
     GLint ok = GL_FALSE;
@@ -316,6 +425,7 @@ static void diagnostic_link_program(GLuint program)
     glGetProgramInfoLog(program, sizeof(info), NULL, info);
     vita_boot_log("shader program link done id=%u status=%d info=%s", program, ok, info);
     if (!ok) vita_boot_fatal("Shader program link failed. See boot.log.");
+    vita_boot_watch_stage("SDL renderer construction after shader program linking");
 }
 
 void *__real_vglGetProcAddress(const char *name);

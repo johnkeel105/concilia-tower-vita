@@ -8326,12 +8326,16 @@ static void render(void)
 
 #ifdef __vita__
     static int first_frame = 1;
-    if (first_frame) CT_BOOT("first gameplay frame submit begin");
+    if (first_frame) {
+        vita_boot_watch_stage("first gameplay frame presentation");
+        CT_BOOT("first gameplay frame submit begin");
+    }
 #endif
     SDL_RenderPresent(game.renderer);
 #ifdef __vita__
     if (first_frame) {
-        CT_BOOT("first gameplay frame presented; SDL=%s", SDL_GetError());
+        CT_BOOT("first gameplay frame presented");
+        vita_boot_watch_stage(NULL);
         first_frame = 0;
     }
 #endif
@@ -10176,6 +10180,10 @@ int main(int argc, char *argv[])
 #ifdef __vita__
     vita_boot_notice_end();
 #endif
+#ifdef __vita__
+    vita_boot_watch_stage("SDL_Init video/audio/controller");
+    SDL_ClearError();
+#endif
     CT_BOOT("SDL_Init begin (video/audio/controller)");
     /* Initialize SDL */
 #ifdef __vita__
@@ -10219,6 +10227,10 @@ int main(int argc, char *argv[])
 #ifdef __vita__
     wflags |= SDL_WINDOW_FULLSCREEN | SDL_WINDOW_OPENGL;
 #endif
+#ifdef __vita__
+    vita_boot_watch_stage("SDL_CreateWindow / SDL-owned vitaGL initialization");
+    SDL_ClearError();
+#endif
     CT_BOOT("SDL_CreateWindow / vitaGL init begin: %dx%d flags=0x%x", WINDOW_W, WINDOW_H, (unsigned)wflags);
     game.window = SDL_CreateWindow("ConciliaTower",
         SDL_WINDOWPOS_CENTERED, SDL_WINDOWPOS_CENTERED,
@@ -10226,6 +10238,10 @@ int main(int argc, char *argv[])
     if (!game.window) return CT_FAIL("SDL_CreateWindow failed.");
     CT_BOOT("SDL_CreateWindow done; SDL_CreateRenderer / GL context / shaders begin");
     
+#ifdef __vita__
+    vita_boot_watch_stage("SDL_CreateRenderer / GLES2 context construction");
+    SDL_ClearError();
+#endif
     /* Software renderer for VNC visibility */
 #if defined(__EMSCRIPTEN__) || defined(__vita__)
     /* EMSCRIPTEN: wasm software renderer was too slow (Jonah, 2026-08-10).
@@ -10245,6 +10261,12 @@ int main(int argc, char *argv[])
     /* Native stays software: the service runs under Xvfb/VNC with no GPU. */
     game.renderer = SDL_CreateRenderer(game.window, -1, SDL_RENDERER_SOFTWARE);
     if (!game.renderer) return CT_FAIL("SDL_CreateRenderer failed.");
+#ifdef __vita__
+    if (!vita_gl_validate_context())
+        return vita_boot_fatal("SDL renderer exists but GL context/pool/version validation failed.");
+    vita_boot_watch_stage("initial renderer clear and frame present");
+    SDL_ClearError();
+#endif
     SDL_RendererInfo renderer_info;
     if (SDL_GetRendererInfo(game.renderer, &renderer_info) == 0) {
         CT_BOOT("renderer/context ready: %s flags=0x%x max texture=%dx%d",
@@ -10268,6 +10290,10 @@ int main(int argc, char *argv[])
     if (game.cursor_arrow) SDL_SetCursor(game.cursor_arrow);
 
     /* Initialize SDL_ttf fonts */
+#ifdef __vita__
+    vita_boot_watch_stage("font loading");
+    SDL_ClearError();
+#endif
     CT_BOOT("font load begin");
     init_fonts();
     CT_BOOT("font load done: main=%p small=%p info=%p dialog=%p SDL=%s",
@@ -10279,6 +10305,10 @@ int main(int argc, char *argv[])
 #endif
     
     /* Load sprites */
+#ifdef __vita__
+    vita_boot_watch_stage("sprite decoding and texture upload");
+    SDL_ClearError();
+#endif
     CT_BOOT("sprite decode/texture upload begin");
     if (sprites_init(&game.sprites, &game.exe, game.renderer) != 0)
         return CT_FAIL("Sprite asset upload failed. See boot.log.");
@@ -10287,6 +10317,10 @@ int main(int argc, char *argv[])
     /* Audio: decode the EXE's 55 WAV effects and wire the sim's sound hook.
      * CT_SOUND_CAPTURE=<path> renders a WAV headless (no device) instead of
      * playing live. Event->sound map: referee_sound_events_2026-07-13.md. */
+#ifdef __vita__
+    vita_boot_watch_stage("audio initialization / decode");
+    SDL_ClearError();
+#endif
     CT_BOOT("audio device and asset decode begin");
     g_sound_capture = getenv("CT_SOUND_CAPTURE") != NULL;
     if (g_sound_capture ? (audio_init_capture() == 0) : (audio_init() == 0)) {
@@ -10298,7 +10332,11 @@ int main(int argc, char *argv[])
         play_snd(SND_STARTUP);          /* intro jingle (referee row 23) */
     }
 
-    CT_BOOT("audio stage done; SDL error=%s; composite sprite processing begin", SDL_GetError());
+    CT_BOOT("audio stage done; composite sprite processing begin");
+#ifdef __vita__
+    vita_boot_watch_stage("composite sprite processing");
+    SDL_ClearError();
+#endif
 
     /* Queue silhouettes use white as transparent */
     sprites_apply_white_key(&game.sprites, game.renderer, SPR_ELEV_QUEUE);
@@ -10522,6 +10560,9 @@ int main(int argc, char *argv[])
     }
     
     CT_BOOT("composite sprite processing done; cloud/sky asset processing begin");
+#ifdef __vita__
+    vita_boot_watch_stage("cloud/sky assets and simulation setup");
+#endif
 
     /* Load cloud sprites (5 different shapes at 0x8384-0x8388)
      * White pixels (0xFF,0xFF,0xFF) must be transparent — same as original game.

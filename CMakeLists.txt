@@ -17,7 +17,7 @@ find_package(Freetype REQUIRED)
 
 set(VITA_APP_NAME "ConciliaTower")
 set(VITA_TITLEID  "CTWR00001")
-set(VITA_VERSION  "00.03")
+set(VITA_VERSION  "00.04")
 
 execute_process(
   COMMAND git describe --always --dirty

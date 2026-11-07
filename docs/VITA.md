@@ -110,8 +110,8 @@ LiveArea images remain 8-bit indexed PNG.
 
 * Misnamed KWAJ EXE explains the old immediate exit: NE parser rejects its missing
   MZ header and main used to return 1, before SDL was initialized.
-* Installed SDL vitaGL backend ignores `vglInitExtended`'s boolean return. A
-  link-time interposer now checks/logs it: GL_TRUE is success, not failure.
+* v0.3 incorrectly interpreted `vglInitExtended`'s boolean as success/failure.
+  This is corrected in v0.4 as described below; zero is normal initialization.
 * SDL GLES2 renderer/context is explicitly requested; unsupported renderer or
   texture upload failures stop visibly instead of proceeding with null objects.
 * CPU heap is explicitly 192 MiB (SDK default was 128 MiB). This is headroom,
@@ -140,3 +140,50 @@ Original backup/relaunch behavior, malformed input, truncated KWAJ and mismatche
 NE segment/resource alignment were also tested with ASan/UBSan. Native Vita
 rendering/controls still require hardware testing; this does not claim a verified
 Vita3K boot.
+
+
+## v0.4: spinner / initialization correction (APP_VER 00.04)
+
+The real-device v0.3 log established successful EXE expansion, resource parsing,
+SDL video startup and vitaGL pool allocation. Our v0.3 interposer then incorrectly
+called a zero vitaGL return a failure. The exact installed SDK package is
+`vitaGL-0.0.0.r1488.g2bdbe89-1`; its source declares GLboolean but returns
+`res_fallback` (whether the requested framebuffer resolution was clamped), NOT
+an initialization-success flag. **Zero is the normal 960x544 result.**
+Reference: <https://github.com/Rinnegatamante/vitaGL/blob/2bdbe89/source/vgl.c>.
+The linked binary's duplicate-init guard and init call graph were also inspected.
+
+There was no explicit second initialization in our startup: SDL owns its single
+call through our interposer. v0.4 keeps that path and guards duplicate requests
+without calling into vitaGL a second time. After SDL creates its renderer, we
+validate the actual current SDL GL context, allocated vitaGL pool, GL_VERSION,
+GL_RENDERER and GL_VENDOR, then exercise the renderer's first clear/present.
+The reported `Unexpected controller element crc` was a stale SDL error, not a
+vitaGL failure. SDL error state is cleared before relevant operations; any fatal
+snapshot is explicitly labeled potentially stale rather than called the cause.
+
+v0.3 tried to allocate a diagnostic framebuffer only AFTER vitaGL reserved all
+CDRAM, which failed with `0x80024309` and left the splash displayed. v0.4 reserves
+2 MiB for the SDK bitmap-font framebuffer BEFORE vitaGL starts, retains it while
+SDL renders, and restores it without allocating or compiling shaders on error.
+Queued GL frames cannot permanently cover it: the error wait reasserts the saved
+framebuffer. In the exceptional case that even that display cannot be restored,
+the invisible wait exits after 30 seconds instead of hanging indefinitely.
+No unsupported `vglEnd` symbol is assumed; this SDK has no such public function.
+
+Memory tuning: leave 24 MiB of user RAM outside vitaGL (previously 12 MiB), and
+set the 2D circular vertex stream to 4 MiB (previously 32 MiB). CPU heap stays
+192 MiB. The reserved framebuffer protects CDRAM even if other pools consume the
+remaining memory. Pool allocations/free memory are logged.
+
+A separate boot watchdog records a stage timeout after 60 seconds and every
+30 seconds thereafter. It does NOT touch GL or force-reset a stalled thread.
+It stops at the first gameplay frame or an acknowledged error path. If still
+stuck, wait at least 65 seconds, then send `boot.log`; it should name the stalled
+stage. A fresh real-Vita test is still required; successful compilation is not
+hardware validation.
+
+LiveArea: background title/subtitle moved to y=130/182 below the system's round
+icons; startup gate now has one-line ConciliaTower and readable PS Vita labels,
+with its bottom 40 pixels clear for the system Start control. All artwork remains
+8-bit indexed PNG. Reproduce with `python3 tools/livearea_art.py` (Pillow).
