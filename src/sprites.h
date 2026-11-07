@@ -16,6 +16,7 @@ typedef struct {
     uint16_t     id;        /* Resource ID (e.g., 0x8568 = lobby) */
     uint16_t     type;      /* Resource type (0x8002 = DIB, 0xFF02 = raw) */
     SDL_Texture *texture;   /* GPU texture for rendering */
+    SDL_Surface *pixels;    /* CPU source for keys/composites; no GPU readback */
     int          w, h;      /* Dimensions in pixels */
 } Sprite;
 
@@ -71,7 +72,10 @@ int sprites_compose_h(SpriteAtlas *atlas, SDL_Renderer *renderer,
 int sprites_compose_v(SpriteAtlas *atlas, SDL_Renderer *renderer,
                       uint16_t id_top, uint16_t id_bottom, uint16_t new_id);
 
-/* Free all textures */
+/* Atomically replace GPU texture and retained CPU source; caller owns surface. */
+int sprites_replace_surface(Sprite *sprite, SDL_Renderer *renderer, SDL_Surface *surface);
+
+/* Free all textures and CPU surfaces */
 void sprites_free(SpriteAtlas *atlas);
 
 #endif /* SPRITES_H */

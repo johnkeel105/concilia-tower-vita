@@ -10174,8 +10174,7 @@ int main(int argc, char *argv[])
     
     CT_BOOT("string tables parse done");
 #ifdef __vita__
-    if (!vita_shader_library_present())
-        return vita_boot_fatal("Shader compiler library missing/unreadable in ur0:data/ or ur0:data/external/.");
+    CT_BOOT("Native GXM renderer selected: libshacccg presence is informational, not required.");
 #endif
 #ifdef __vita__
     vita_boot_notice_end();
@@ -10198,20 +10197,13 @@ int main(int argc, char *argv[])
 #ifdef __vita__
     CT_BOOT("SDL_Init done: video driver=%s", SDL_GetCurrentVideoDriver());
     vita_init_runtime();
-    /* Match SDL's GLES2 renderer: no desktop 3.x/core context request. */
     for (int i = 0; i < SDL_GetNumRenderDrivers(); i++) {
         SDL_RendererInfo info;
         if (SDL_GetRenderDriverInfo(i, &info) == 0)
             CT_BOOT("SDL render driver %d: %s flags=0x%x", i, info.name, (unsigned)info.flags);
     }
-    SDL_SetHint(SDL_HINT_RENDER_DRIVER, "opengles2");
-    if (SDL_GL_SetAttribute(SDL_GL_CONTEXT_MAJOR_VERSION, 2) != 0 ||
-        SDL_GL_SetAttribute(SDL_GL_CONTEXT_MINOR_VERSION, 0) != 0 ||
-        SDL_GL_SetAttribute(SDL_GL_CONTEXT_PROFILE_MASK, SDL_GL_CONTEXT_PROFILE_ES) != 0)
-        return vita_boot_fatal("Could not request compatible GLES 2.0 context.");
-    SDL_GL_SetAttribute(SDL_GL_MULTISAMPLEBUFFERS, 0);
-    SDL_GL_SetAttribute(SDL_GL_MULTISAMPLESAMPLES, 0);
-    CT_BOOT("GL context attributes: ES 2.0, MSAA disabled");
+    SDL_SetHintWithPriority(SDL_HINT_RENDER_DRIVER, "VITA gxm", SDL_HINT_OVERRIDE);
+    CT_BOOT("Renderer policy: native VITA gxm, no OPENGL window/context or runtime shader compiler");
 #endif
     
     game.screen_w = WINDOW_W;
@@ -10225,47 +10217,38 @@ int main(int argc, char *argv[])
     wflags |= SDL_WINDOW_RESIZABLE;
 #endif
 #ifdef __vita__
-    wflags |= SDL_WINDOW_FULLSCREEN | SDL_WINDOW_OPENGL;
+    wflags |= SDL_WINDOW_FULLSCREEN;
 #endif
 #ifdef __vita__
-    vita_boot_watch_stage("SDL_CreateWindow / SDL-owned vitaGL initialization");
+    vita_boot_watch_stage("SDL_CreateWindow (native, no GL)");
     SDL_ClearError();
 #endif
-    CT_BOOT("SDL_CreateWindow / vitaGL init begin: %dx%d flags=0x%x", WINDOW_W, WINDOW_H, (unsigned)wflags);
+    CT_BOOT("SDL_CreateWindow (native) begin: %dx%d flags=0x%x", WINDOW_W, WINDOW_H, (unsigned)wflags);
     game.window = SDL_CreateWindow("ConciliaTower",
         SDL_WINDOWPOS_CENTERED, SDL_WINDOWPOS_CENTERED,
         WINDOW_W, WINDOW_H, wflags);
     if (!game.window) return CT_FAIL("SDL_CreateWindow failed.");
-    CT_BOOT("SDL_CreateWindow done; SDL_CreateRenderer / GL context / shaders begin");
+    CT_BOOT("SDL_CreateWindow done; native GXM renderer creation begins");
     
 #ifdef __vita__
-    vita_boot_watch_stage("SDL_CreateRenderer / GLES2 context construction");
+    vita_boot_watch_stage("native GXM renderer construction");
     SDL_ClearError();
 #endif
-    /* Software renderer for VNC visibility */
-#if defined(__EMSCRIPTEN__) || defined(__vita__)
-    /* EMSCRIPTEN: wasm software renderer was too slow (Jonah, 2026-08-10).
-     * VITA: sdl2_vitagl accelerated renderer. TARGETTEXTURE is required
-     * for sprites.c texture_to_surface readback. */
+#ifdef __vita__
+    /* Choose by name, never hard-code the current driver index (2).
+     * Do not first initialize vitaGL: it cannot be safely torn down in this SDK. */
+    game.renderer = vita_create_native_renderer(game.window);
+    if (!game.renderer) return vita_boot_fatal("Native VITA gxm renderer creation failed.");
+    vita_boot_watch_stage("initial native GXM clear and frame present");
+    SDL_ClearError();
+#else
+#ifdef __EMSCRIPTEN__
     game.renderer = SDL_CreateRenderer(game.window, -1,
         SDL_RENDERER_ACCELERATED | SDL_RENDERER_TARGETTEXTURE);
-    if (!game.renderer) {
-        CT_BOOT("Accelerated renderer failed: %s", SDL_GetError());
-#ifdef __vita__
-        /* Software fallback on an OPENGL Vita window is not a safe recovery. */
-        return vita_boot_fatal("SDL GLES2 renderer/context creation failed.");
-#endif
-    }
     if (!game.renderer)
 #endif
-    /* Native stays software: the service runs under Xvfb/VNC with no GPU. */
     game.renderer = SDL_CreateRenderer(game.window, -1, SDL_RENDERER_SOFTWARE);
     if (!game.renderer) return CT_FAIL("SDL_CreateRenderer failed.");
-#ifdef __vita__
-    if (!vita_gl_validate_context())
-        return vita_boot_fatal("SDL renderer exists but GL context/pool/version validation failed.");
-    vita_boot_watch_stage("initial renderer clear and frame present");
-    SDL_ClearError();
 #endif
     SDL_RendererInfo renderer_info;
     if (SDL_GetRendererInfo(game.renderer, &renderer_info) == 0) {
@@ -10508,6 +10491,9 @@ int main(int argc, char *argv[])
                 Sprite *nw  = sprites_find(&game.sprites, temp_id);
                 if (old && nw) {
                     SDL_DestroyTexture(old->texture);
+                    SDL_FreeSurface(old->pixels);
+                    old->pixels = nw->pixels;
+                    nw->pixels = NULL;
                     old->texture = nw->texture;
                     old->w = nw->w;
                     old->h = nw->h;
@@ -10596,8 +10582,10 @@ int main(int argc, char *argv[])
             /* Replace the existing sprite's texture */
             Sprite *cs = sprites_find(&game.sprites, cloud_ids[i]);
             if (cs) {
-                SDL_DestroyTexture(cs->texture);
-                cs->texture = SDL_CreateTextureFromSurface(game.renderer, surf);
+                if (sprites_replace_surface(cs, game.renderer, surf) != 0) {
+                    SDL_FreeSurface(surf);
+                    return CT_FAIL("Sprite surface replacement failed.");
+                }
                 SDL_SetTextureBlendMode(cs->texture, SDL_BLENDMODE_BLEND);
                 game.clouds[i] = cs;
                 game.cloud_count++;
@@ -10628,8 +10616,10 @@ int main(int argc, char *argv[])
                 SDL_SetColorKey(surf, SDL_TRUE, SDL_MapRGB(surf->format, 0xFF, 0xFF, 0xFF));
                 Sprite *ss = sprites_find(&game.sprites, SPR_SANTA);
                 if (ss) {
-                    SDL_DestroyTexture(ss->texture);
-                    ss->texture = SDL_CreateTextureFromSurface(game.renderer, surf);
+                    if (sprites_replace_surface(ss, game.renderer, surf) != 0) {
+                        SDL_FreeSurface(surf);
+                        return CT_FAIL("Sprite surface replacement failed.");
+                    }
                     SDL_SetTextureBlendMode(ss->texture, SDL_BLENDMODE_BLEND);
                     game.santa = ss;
                     printf("🎅 Santa sprite loaded: %dx%d\n", ss->w, ss->h);
@@ -10671,8 +10661,10 @@ int main(int argc, char *argv[])
                     SDL_SetColorKey(surf, SDL_TRUE, SDL_MapRGB(surf->format, 0xFF, 0xFF, 0xFF));
                     Sprite *sp = sprites_find(&game.sprites, decos[d].id);
                     if (sp) {
-                        SDL_DestroyTexture(sp->texture);
-                        sp->texture = SDL_CreateTextureFromSurface(game.renderer, surf);
+                        if (sprites_replace_surface(sp, game.renderer, surf) != 0) {
+                            SDL_FreeSurface(surf);
+                            return CT_FAIL("Sprite surface replacement failed.");
+                        }
                         SDL_SetTextureBlendMode(sp->texture, SDL_BLENDMODE_BLEND);
                         *decos[d].target = sp;
                         printf("🎨 %s loaded: %dx%d (0x%04X)\n", decos[d].name, sp->w, sp->h, decos[d].id);
@@ -10695,8 +10687,10 @@ int main(int argc, char *argv[])
                 SDL_SetColorKey(surf, SDL_TRUE, SDL_MapRGB(surf->format, 138, 212, 255));
                 Sprite *sp = sprites_find(&game.sprites, SPR_SKYLINE);
                 if (sp) {
-                    SDL_DestroyTexture(sp->texture);
-                    sp->texture = SDL_CreateTextureFromSurface(game.renderer, surf);
+                    if (sprites_replace_surface(sp, game.renderer, surf) != 0) {
+                        SDL_FreeSurface(surf);
+                        return CT_FAIL("Sprite surface replacement failed.");
+                    }
                     SDL_SetTextureBlendMode(sp->texture, SDL_BLENDMODE_BLEND);
                     game.skyline = sp;
                     printf("🎨 City skyline loaded: %dx%d (sky-blue transparent)\n", sp->w, sp->h);

@@ -120,15 +120,19 @@ void vita_boot_begin(void)
     /* Keep last run available even if the new run fails very early. */
     sceIoRemove(CT_DATA_DIR "/boot.previous.log");
     sceIoRename(CT_DATA_DIR "/boot.log", CT_DATA_DIR "/boot.previous.log");
-    vita_boot_log("ConciliaTower v0.4 APP_VER=00.04 build=%s: app start", CT_BUILD_VERSION);
+    vita_boot_log("ConciliaTower v0.5 APP_VER=00.05 build=%s: app start", CT_BUILD_VERSION);
     vita_boot_log("kernel process clock available; mkdir ux0:data=0x%08x data dir=0x%08x; log writable=%d",
                   data_rc, dir_rc, log_writable);
     vita_boot_log("newlib heap=%u MiB; startup diagnostics use no SDL/GL", _newlib_heap_size_user >> 20);
     if (!log_writable) vita_boot_fatal("Cannot write boot.log. Check ux0:data/concilia-tower/ free space/write access.");
     SDL_LogSetOutputFunction(sdl_log_output, NULL);
     SDL_LogSetAllPriority(SDL_LOG_PRIORITY_INFO);
-    vita_boot_log("shader-library preflight follows (presence is not proof the module can load)");
+    vita_boot_log("shader-library presence check is informational only; native GXM does not load the runtime compiler");
     vita_shader_library_present();
+    extern const char *GLES2_GetShader(int type);
+    const char *historic_shader = GLES2_GetShader(6);
+    vita_boot_log("v0.4 failed shader #7 = SDL GLES2 table type 6 GLES2_SHADER_FRAGMENT_TEXTURE_YUV_JPEG (Cg); unused by this RGB-only game");
+    vita_boot_log("installed historical shader #7 source BEGIN\n%s\nsource END", historic_shader ? historic_shader : "(not present)");
     reserve_error_frame();
     SceUID watchdog = sceKernelCreateThread("ct_boot_watchdog", boot_watchdog,
                                            0x10000100, 64 * 1024, 0, 0, NULL);
@@ -288,7 +292,7 @@ void vita_boot_notice(const char *message)
     reserve_error_frame();
     if (error_frame_reserved) sceDisplaySetFrameBuf(&error_frame, SCE_DISPLAY_SETBUF_NEXTFRAME);
     if (debug_screen_active)
-        psvDebugScreenPrintf("\e[2J\e[1;1HConciliaTower v0.4\n\n%s\n\nLog: ux0:data/concilia-tower/boot.log\n", message);
+        psvDebugScreenPrintf("\e[2J\e[1;1HConciliaTower v0.5\n\n%s\n\nLog: ux0:data/concilia-tower/boot.log\n", message);
 }
 
 void vita_boot_notice_end(void)
@@ -308,7 +312,7 @@ int vita_boot_fatal(const char *reason)
     int rc = error_frame_reserved ? sceDisplaySetFrameBuf(&error_frame, SCE_DISPLAY_SETBUF_NEXTFRAME) : -1;
     vita_boot_log("reserved direct framebuffer error screen restore=0x%08x", rc);
     if (rc >= 0) {
-        psvDebugScreenPrintf("\e[2J\e[1;1HConciliaTower v0.4 - startup stopped\n\n%s\nSDL diagnostic (may be stale): %s\n\n", reason, error);
+        psvDebugScreenPrintf("\e[2J\e[1;1HConciliaTower v0.5 - startup stopped\n\n%s\nSDL diagnostic (may be stale): %s\n\n", reason, error);
         psvDebugScreenPrintf("Log: ux0:data/concilia-tower/boot.log\nLog writable: %s\n\n", log_writable ? "yes" : "NO - check free space/write access");
         psvDebugScreenPrintf("EXE search (FOUND = detected, not yet validated):\n%s\n", search_report);
         psvDebugScreenPrintf("\nSend boot.log and a photo of this screen.\nRelease buttons, then press START or Circle to exit.\n");
@@ -384,19 +388,50 @@ GLboolean __wrap_vglInitExtended(int pool, int width, int height, int threshold,
     return gl_resolution_fallback;
 }
 
-int vita_gl_validate_context(void)
+SDL_Renderer *vita_create_native_renderer(SDL_Window *window)
 {
-    const GLubyte *version = glGetString(GL_VERSION);
-    const GLubyte *renderer = glGetString(GL_RENDERER);
-    const GLubyte *vendor = glGetString(GL_VENDOR);
-    SDL_GLContext context = SDL_GL_GetCurrentContext();
-    size_t pool = vglMemTotal(VGL_MEM_ALL);
-    vita_boot_log("GL actual state: init calls=%u SDL context=%p pool bytes=%u GL_VERSION=%s GL_RENDERER=%s GL_VENDOR=%s",
-                  gl_init_calls, context, (unsigned)pool,
-                  version ? (const char *)version : "(null)",
-                  renderer ? (const char *)renderer : "(null)",
-                  vendor ? (const char *)vendor : "(null)");
-    return gl_init_calls == 1 && context && pool && version && version[0];
+    int driver = -1;
+    for (int i = 0; i < SDL_GetNumRenderDrivers(); i++) {
+        SDL_RendererInfo info;
+        if (SDL_GetRenderDriverInfo(i, &info) == 0 && !strcmp(info.name, "VITA gxm")) {
+            driver = i;
+            break;
+        }
+    }
+    if (driver < 0) { SDL_SetError("Installed SDL lacks native VITA gxm renderer"); return NULL; }
+    if (gl_init_calls || (SDL_GetWindowFlags(window) & SDL_WINDOW_OPENGL)) {
+        SDL_SetError("Refusing to mix native GXM and already initialized vitaGL");
+        return NULL;
+    }
+    log_free_memory("before native GXM");
+    SDL_ClearError();
+    SDL_Renderer *renderer = SDL_CreateRenderer(window, driver,
+        SDL_RENDERER_ACCELERATED | SDL_RENDERER_TARGETTEXTURE | SDL_RENDERER_PRESENTVSYNC);
+    vita_boot_log("native renderer result=%p driver=%d name=VITA gxm vitaGL calls=%u SDL=%s",
+                  (void *)renderer, driver, gl_init_calls, renderer ? "(success)" : SDL_GetError());
+    log_free_memory("after native GXM");
+    return renderer;
+}
+
+/* Preserve the last submitted source independently of vitaGL's info/source
+ * queries, which can be empty on a compile failure. SDL compiles immediately
+ * after glShaderSource; this bounded snapshot also covers that failure path. */
+static GLuint submitted_shader;
+static char submitted_source[16384];
+static void diagnostic_shader_source(GLuint shader, GLsizei count,
+                                     const GLchar *const *strings, const GLint *lengths)
+{
+    submitted_shader = shader;
+    size_t used = 0;
+    for (int i = 0; i < count && used < sizeof(submitted_source) - 1; i++) {
+        if (!strings[i]) continue;
+        size_t n = lengths && lengths[i] >= 0 ? (size_t)lengths[i] : strlen(strings[i]);
+        if (n > sizeof(submitted_source) - used - 1) n = sizeof(submitted_source) - used - 1;
+        memcpy(submitted_source + used, strings[i], n);
+        used += n;
+    }
+    submitted_source[used] = 0;
+    glShaderSource(shader, count, strings, lengths);
 }
 
 /* SDL resolves GL entry points via vglGetProcAddress, not direct linkage. */
@@ -409,8 +444,26 @@ static void diagnostic_compile_shader(GLuint shader)
     char info[2048] = {0};
     glGetShaderiv(shader, GL_COMPILE_STATUS, &ok);
     glGetShaderInfoLog(shader, sizeof(info), NULL, info);
-    vita_boot_log("shader compile done id=%u status=%d info=%s", shader, ok, info);
-    if (!ok) vita_boot_fatal("Shader compilation failed. See boot.log compiler output.");
+    GLint log_length = 0;
+    glGetShaderiv(shader, GL_INFO_LOG_LENGTH, &log_length);
+    vita_boot_log("shader compile done id=%u status=%d info_length=%d info=%s", shader, ok, log_length, info);
+    if (!ok) {
+        if (submitted_shader == shader)
+            vita_boot_log("captured failed shader id=%u submitted source BEGIN\n%s\nsource END", shader, submitted_source);
+        GLint length = 0;
+        glGetShaderiv(shader, GL_SHADER_SOURCE_LENGTH, &length);
+        if (length > 0 && length <= 65536) {
+            char *source = malloc((size_t)length + 1);
+            if (source) {
+                source[0] = 0;
+                glGetShaderSource(shader, length, NULL, source);
+                source[length] = 0;
+                vita_boot_log("failed shader id=%u source BEGIN\n%s\nsource END", shader, source);
+                free(source);
+            }
+        }
+        vita_boot_log("shader failure returned to SDL (allow its retry/error handling; not fatal per compile)");
+    }
     vita_boot_watch_stage("SDL renderer construction after shader compilation");
 }
 
@@ -424,13 +477,14 @@ static void diagnostic_link_program(GLuint program)
     glGetProgramiv(program, GL_LINK_STATUS, &ok);
     glGetProgramInfoLog(program, sizeof(info), NULL, info);
     vita_boot_log("shader program link done id=%u status=%d info=%s", program, ok, info);
-    if (!ok) vita_boot_fatal("Shader program link failed. See boot.log.");
+    if (!ok) vita_boot_log("shader program link failure returned to SDL for renderer-level handling");
     vita_boot_watch_stage("SDL renderer construction after shader program linking");
 }
 
 void *__real_vglGetProcAddress(const char *name);
 void *__wrap_vglGetProcAddress(const char *name)
 {
+    if (!strcmp(name, "glShaderSource")) return (void *)diagnostic_shader_source;
     if (!strcmp(name, "glCompileShader")) return (void *)diagnostic_compile_shader;
     if (!strcmp(name, "glLinkProgram")) return (void *)diagnostic_link_program;
     return __real_vglGetProcAddress(name);

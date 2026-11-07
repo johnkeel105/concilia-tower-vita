@@ -187,3 +187,57 @@ LiveArea: background title/subtitle moved to y=130/182 below the system's round
 icons; startup gate now has one-line ConciliaTower and readable PS Vita labels,
 with its bottom 40 pixels clear for the system Start control. All artwork remains
 8-bit indexed PNG. Reproduce with `python3 tools/livearea_art.py` (Pillow).
+
+
+## v0.5: native GXM; no runtime video shader compilation (APP_VER 00.05)
+
+The exact installed `sdl2_vitagl-2.32.8-1` builds the standard SDL 2.32.8 renderer
+with `vitasdk/packages/sdl2_vitagl/vitagl-backend.patch`. Crucially, that patch
+replaces the GLES2 GLSL table with **Cg shaders**. The first six successful shaders
+are vertex, solid, ABGR, ARGB, BGR, RGB. **Shader object #7 is table type 6,
+`GLES2_SHADER_FRAGMENT_TEXTURE_YUV_JPEG`**, the first planar video conversion
+shader. It is not a shader written by ConciliaTower, and not external-OES/NV12.
+This identification was checked against symbols and bytes in the installed
+`libSDL2.a`'s `SDL_shaders_gles2_cg.c.obj`, not just a generic upstream table.
+Its Cg function contains `uniform vec4 u_modulation` and a trailing parameter
+comma: malformed Cg. Other YUV variants have additional GLSL remnants. The
+compiler supplied no diagnostic string, so the specific rejected token was not
+reported by hardware. SDL eagerly compiles this unused table during renderer
+construction, and v0.4's per-compile fatal hook stopped even its retry handling.
+
+References:
+- <https://github.com/vitasdk/packages/blob/master/sdl2_vitagl/VITABUILD>
+- <https://github.com/vitasdk/packages/blob/master/sdl2_vitagl/vitagl-backend.patch>
+- <https://github.com/libsdl-org/SDL/blob/release-2.32.8/src/render/opengles2/SDL_render_gles2.c>
+
+**v0.5 selects SDL's native `VITA gxm` renderer by name from the start.** No
+OPENGL window, no GL context attributes, no vitaGL initialization, no speculative
+GL-then-GXM switch, and no runtime `libshacccg` requirement. Game drawing uses
+SDL_Renderer throughout; all raw GL calls were diagnostic hooks, not gameplay.
+Native GXM uses SDL's built-in precompiled shader programs. This skips all of the
+unused GLES2 YUV/NV12/external shaders rather than lying about compile success.
+If native GXM is unavailable or fails, we stop visibly; we do not mix two GXM
+owners/pools after a failed GL attempt (the installed vitaGL has no safe teardown).
+The exact selected renderer and zero vitaGL-init calls are logged.
+
+A necessary compatibility fix: native GXM's SDL_RenderReadPixels does not support
+render-target textures. Sprite keys and building composites formerly depended on
+that operation, so sprites now retain their CPU source surfaces and compose/key
+on CPU before uploading. All replacements update texture and CPU source
+atomically, and cleanup frees both. CPU source atlas is about 15.4 MB for the
+supplied EXE's 261 textures, fitting the existing 192 MiB CPU heap. This prevents
+missing composites/transparency on the native backend. Render-target drawing for
+other UI effects is retained; screenshot readback only targets the main display.
+
+Diagnostics now log the **exact historical #7 source from the installed SDL
+selector at boot**, even though it is never compiled in the native path. If GL
+is ever used during future debugging, hooks retain glShaderSource text and dump
+it plus glGetShaderSource, GL_INFO_LOG_LENGTH and glGetShaderInfoLog on failure.
+A compile/link failure is returned to SDL rather than treated as globally fatal
+before SDL can retry or report renderer-level failure.
+
+Host ASan/UBSan tests cover surface replacement, white transparency, horizontal
+and vertical composition, transparent padding and cleanup, including all 261
+real EXE textures and a representative building composite. Fixed signed alpha
+left shifts found by UBSan. Cross-build and package checks pass. This is not yet
+a real-Vita gameplay validation; send `boot.log` if a later stage fails.

@@ -84,14 +84,14 @@ SDL_Surface *dib_to_surface(NEResource *res, SpriteAtlas *atlas)
             uint8_t idx = src_row[x];
             if (has_local_palette) {
                 uint8_t *ct = color_table + idx * 4;
-                dst_row[x] = (0xFF << 24) | (ct[2] << 16) | (ct[1] << 8) | ct[0];
+                dst_row[x] = (0xFFu << 24) | (ct[2] << 16) | (ct[1] << 8) | ct[0];
             } else if (atlas->palette_loaded) {
-                dst_row[x] = (0xFF << 24) | 
+                dst_row[x] = (0xFFu << 24) |
                     (atlas->palette[idx][0] << 16) | 
                     (atlas->palette[idx][1] << 8) | 
                     atlas->palette[idx][2];
             } else {
-                dst_row[x] = (0xFF << 24) | (idx << 16) | (idx << 8) | idx;
+                dst_row[x] = (0xFFu << 24) | (idx << 16) | (idx << 8) | idx;
             }
         }
     }
@@ -126,7 +126,7 @@ static SDL_Surface *raw_to_surface(NEResource *res, SpriteAtlas *atlas)
         if (dstx < width && dsty < height) {
             uint8_t *c = atlas->palette[src[i]];
             uint32_t *row = (uint32_t *)((uint8_t *)surf->pixels + dsty * surf->pitch);
-            row[dstx] = (0xFF << 24) | (c[0] << 16) | (c[1] << 8) | c[2];
+            row[dstx] = (0xFFu << 24) | (c[0] << 16) | (c[1] << 8) | c[2];
         }
     }
     SDL_UnlockSurface(surf);
@@ -159,6 +159,8 @@ int sprites_init(SpriteAtlas *atlas, NEResourceTable *exe, SDL_Renderer *rendere
                     s->texture = tex;
                     s->w = surf->w;
                     s->h = surf->h;
+                    s->pixels = surf;
+                    surf = NULL; /* atlas owns the source surface */
                     loaded++;
                 } else {
                     upload_failures++;
@@ -183,6 +185,8 @@ int sprites_init(SpriteAtlas *atlas, NEResourceTable *exe, SDL_Renderer *rendere
                     s->texture = tex;
                     s->w = surf->w;
                     s->h = surf->h;
+                    s->pixels = surf;
+                    surf = NULL; /* atlas owns the source surface */
                     loaded++;
                 } else {
                     upload_failures++;
@@ -233,30 +237,28 @@ void sprites_draw_scaled(SDL_Renderer *renderer, Sprite *sprite,
 
 /* ---------- Sprite composition ---------- */
 
-/* Helper: read a texture back into a surface */
-static SDL_Surface *texture_to_surface(SDL_Renderer *renderer, SDL_Texture *tex, int w, int h)
+/* Native GXM cannot read render-target textures. Keep original CPU pixels
+ * instead of GPU round-tripping every transparency mask/composite operation. */
+static SDL_Surface *sprite_to_surface(const Sprite *sprite)
 {
-    SDL_Surface *surf = SDL_CreateRGBSurface(0, w, h, 32,
-        0x00FF0000, 0x0000FF00, 0x000000FF, 0xFF000000);
-    if (!surf) return NULL;
-    
-    SDL_Texture *target = SDL_CreateTexture(renderer, SDL_PIXELFORMAT_ARGB8888,
-        SDL_TEXTUREACCESS_TARGET, w, h);
-    if (!target) { SDL_FreeSurface(surf); return NULL; }
-    
-    SDL_Texture *previous = SDL_GetRenderTarget(renderer);
-    if (SDL_SetRenderTarget(renderer, target) != 0 ||
-        SDL_RenderCopy(renderer, tex, NULL, NULL) != 0 ||
-        SDL_RenderReadPixels(renderer, NULL, SDL_PIXELFORMAT_ARGB8888, surf->pixels, surf->pitch) != 0) {
-        SPR_TRACE("texture readback failed %dx%d: %s", w, h, SDL_GetError());
-        SDL_SetRenderTarget(renderer, previous);
-        SDL_DestroyTexture(target);
-        SDL_FreeSurface(surf);
-        return NULL;
-    }
-    SDL_SetRenderTarget(renderer, previous);
-    SDL_DestroyTexture(target);
-    return surf;
+    if (!sprite || !sprite->pixels) return NULL;
+    return SDL_ConvertSurface(sprite->pixels, sprite->pixels->format, 0);
+}
+
+int sprites_replace_surface(Sprite *sprite, SDL_Renderer *renderer, SDL_Surface *surface)
+{
+    if (!sprite || !surface) return -1;
+    SDL_Surface *copy = SDL_ConvertSurface(surface, surface->format, 0);
+    if (!copy) return -1;
+    SDL_Texture *texture = SDL_CreateTextureFromSurface(renderer, surface);
+    if (!texture) { SDL_FreeSurface(copy); return -1; }
+    SDL_DestroyTexture(sprite->texture);
+    SDL_FreeSurface(sprite->pixels);
+    sprite->texture = texture;
+    sprite->pixels = copy;
+    sprite->w = surface->w;
+    sprite->h = surface->h;
+    return 0;
 }
 
 /* Palette-cycle animation (the EXE's 'animated bitmaps'): frames are made
@@ -299,12 +301,12 @@ int sprites_load_palette_cycled(SpriteAtlas *atlas, NEResourceTable *exe,
     if (!surf) return -1;
     SDL_Texture *tex = SDL_CreateTextureFromSurface(renderer, surf);
     int w = surf->w, h = surf->h;
-    SDL_FreeSurface(surf);
-    if (!tex) return -1;
+    if (!tex) { SDL_FreeSurface(surf); return -1; }
     Sprite *sp = &atlas->sprites[atlas->count++];
     sp->id = new_id;
     sp->type = 0x8002;
     sp->texture = tex;
+    sp->pixels = surf;
     sp->w = w;
     sp->h = h;
     return 0;
@@ -315,13 +317,14 @@ int sprites_apply_color_key(SpriteAtlas *atlas, SDL_Renderer *renderer,
 {
     Sprite *s = sprites_find(atlas, id);
     if (!s) return -1;
-    SDL_Surface *surf = texture_to_surface(renderer, s->texture, s->w, s->h);
+    SDL_Surface *surf = sprite_to_surface(s);
     if (!surf) return -1;
     SDL_SetColorKey(surf, SDL_TRUE, SDL_MapRGB(surf->format, r, g, b));
     SDL_Texture *tex = SDL_CreateTextureFromSurface(renderer, surf);
-    SDL_FreeSurface(surf);
-    if (!tex) return -1;
+    if (!tex) { SDL_FreeSurface(surf); return -1; }
     SDL_DestroyTexture(s->texture);
+    SDL_FreeSurface(s->pixels);
+    s->pixels = surf;
     s->texture = tex;
     return 0;
 }
@@ -342,8 +345,8 @@ int sprites_compose_h(SpriteAtlas *atlas, SDL_Renderer *renderer,
     int w = left->w + right->w;
     int h = left->h > right->h ? left->h : right->h;
     
-    SDL_Surface *lsurf = texture_to_surface(renderer, left->texture, left->w, left->h);
-    SDL_Surface *rsurf = texture_to_surface(renderer, right->texture, right->w, right->h);
+    SDL_Surface *lsurf = sprite_to_surface(left);
+    SDL_Surface *rsurf = sprite_to_surface(right);
     if (!lsurf || !rsurf) {
         if (lsurf) SDL_FreeSurface(lsurf);
         if (rsurf) SDL_FreeSurface(rsurf);
@@ -352,6 +355,8 @@ int sprites_compose_h(SpriteAtlas *atlas, SDL_Renderer *renderer,
     
     SDL_Surface *combined = SDL_CreateRGBSurface(0, w, h, 32,
         0x00FF0000, 0x0000FF00, 0x000000FF, 0xFF000000);
+    if (!combined) { SDL_FreeSurface(lsurf); SDL_FreeSurface(rsurf); return -1; }
+    SDL_FillRect(combined, NULL, 0);
     SDL_Rect ldst = { 0, 0, left->w, left->h };
     SDL_Rect rdst = { left->w, 0, right->w, right->h };
     SDL_BlitSurface(lsurf, NULL, combined, &ldst);
@@ -360,13 +365,13 @@ int sprites_compose_h(SpriteAtlas *atlas, SDL_Renderer *renderer,
     SDL_FreeSurface(rsurf);
     
     SDL_Texture *tex = SDL_CreateTextureFromSurface(renderer, combined);
-    SDL_FreeSurface(combined);
-    if (!tex) return -1;
+    if (!tex) { SDL_FreeSurface(combined); return -1; }
     
     Sprite *s = &atlas->sprites[atlas->count++];
     s->id = new_id;
     s->type = 0x0001; /* composite */
     s->texture = tex;
+    s->pixels = combined;
     s->w = w;
     s->h = h;
     
@@ -383,8 +388,8 @@ int sprites_compose_v(SpriteAtlas *atlas, SDL_Renderer *renderer,
     int w = top->w > bot->w ? top->w : bot->w;
     int h = top->h + bot->h;
     
-    SDL_Surface *tsurf = texture_to_surface(renderer, top->texture, top->w, top->h);
-    SDL_Surface *bsurf = texture_to_surface(renderer, bot->texture, bot->w, bot->h);
+    SDL_Surface *tsurf = sprite_to_surface(top);
+    SDL_Surface *bsurf = sprite_to_surface(bot);
     if (!tsurf || !bsurf) {
         if (tsurf) SDL_FreeSurface(tsurf);
         if (bsurf) SDL_FreeSurface(bsurf);
@@ -393,6 +398,8 @@ int sprites_compose_v(SpriteAtlas *atlas, SDL_Renderer *renderer,
     
     SDL_Surface *combined = SDL_CreateRGBSurface(0, w, h, 32,
         0x00FF0000, 0x0000FF00, 0x000000FF, 0xFF000000);
+    if (!combined) { SDL_FreeSurface(tsurf); SDL_FreeSurface(bsurf); return -1; }
+    SDL_FillRect(combined, NULL, 0);
     SDL_Rect tdst = { 0, 0, top->w, top->h };
     SDL_Rect bdst = { 0, top->h, bot->w, bot->h };
     SDL_BlitSurface(tsurf, NULL, combined, &tdst);
@@ -404,13 +411,13 @@ int sprites_compose_v(SpriteAtlas *atlas, SDL_Renderer *renderer,
     SDL_SetColorKey(combined, SDL_TRUE, SDL_MapRGB(combined->format, 0xFF, 0xFF, 0xFF));
     
     SDL_Texture *tex = SDL_CreateTextureFromSurface(renderer, combined);
-    SDL_FreeSurface(combined);
-    if (!tex) return -1;
+    if (!tex) { SDL_FreeSurface(combined); return -1; }
     
     Sprite *s = &atlas->sprites[atlas->count++];
     s->id = new_id;
     s->type = 0x0001; /* composite */
     s->texture = tex;
+    s->pixels = combined;
     s->w = w;
     s->h = h;
     
@@ -420,6 +427,7 @@ int sprites_compose_v(SpriteAtlas *atlas, SDL_Renderer *renderer,
 void sprites_free(SpriteAtlas *atlas)
 {
     for (int i = 0; i < atlas->count; i++) {
+        SDL_FreeSurface(atlas->sprites[i].pixels);
         if (atlas->sprites[i].texture)
             SDL_DestroyTexture(atlas->sprites[i].texture);
     }

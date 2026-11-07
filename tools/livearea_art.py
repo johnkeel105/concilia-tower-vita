@@ -21,7 +21,7 @@ draw = ImageDraw.Draw(bg)
 for y in range(212):
     draw.line((0, y, 400, y), fill=bg.getpixel((bg.width - 1, y)))
 draw.text((40, 130), "ConciliaTower", font=font(38), fill=CREAM, anchor="lt")
-draw.text((43, 182), "A SimTower rewrite  /  VitaGL", font=font(18), fill=GOLD, anchor="lt")
+draw.text((43, 182), "A SimTower rewrite  /  PS Vita", font=font(18), fill=GOLD, anchor="lt")
 indexed(bg, ART / "bg.png")
 
 # Launch gate: one-line title, clearly legible platform label. Bottom 40 px
