@@ -504,3 +504,16 @@ Build/package validated; Tyler will confirm v0.9 on hardware. No release/push.
 * `bg.png` and `pic0.png` now come from the logo-free key art
   (`keyart_nologo.jpg`): tower on the left, sky on the right. The logo lives
   only in the gate (`startup.png`).
+
+## v0.13: system manual over the silhouette key art (APP_VER 00.13)
+
+* The LiveArea system manual pages (`sce_sys/manual/001-006.png`, native
+  fullscreen 960x544, consecutive 3-digit names) now use Tyler's navy
+  silhouette key art as a full-page background, with white/light text (drop
+  shadow) on a translucent dark panel sized to the text, and a dark header bar.
+  Pages are dithered 8-bit indexed PNGs.
+* The background is stored as `vita/manual/manual_bg.png` (indexed 960x544,
+  centre-cropped); the source JPG is not committed. Rebuild it with
+  `python3 tools/manual_gen.py --bg /path/to/readme_silhouette.jpg`; a plain
+  `python3 tools/manual_gen.py` reuses the stored background.
+* The in-game Help manual window is unchanged (text-only, game UI style).
