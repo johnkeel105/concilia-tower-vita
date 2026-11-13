@@ -1,8 +1,11 @@
 <?xml version="1.0" encoding="utf-8"?>
 
-<!-- Style a3: Start gate on the right of the card (over the sky), so the
-     tower on the left of the key art stays visible. a1 centers the gate. -->
-<livearea style="a3" format-ver="01.00" content-rev="1">
+<!-- Style a5: Start gate in the RIGHT half of the card. Firmware layout
+     (vs0:vsh/shell/livearea a5): gate centre (+240,+66) from card centre,
+     i.e. x 520-800, y 105-263 on the 840x500 bg, over open sky; the tower
+     sits on the left. (a1-a4 centre the gate horizontally; v0.11 used a3.)
+     a5's frames are left undeclared, so they stay empty. -->
+<livearea style="a5" format-ver="01.00" content-rev="1">
 	<livearea-background>
 		<image>bg.png</image>
 	</livearea-background>

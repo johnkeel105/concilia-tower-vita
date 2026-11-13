@@ -4,7 +4,7 @@
 usage: python3 tools/brand_art.py LOGO.jpg DOME.jpg KEYART.jpg
   LOGO   (VITA TOWER / THE VERTICAL IS PORTABLE, on sky) -> livearea startup.png 280x158
   DOME   (round tower-top illustration)                  -> icon0.png 128x128
-  KEYART (tower + helicopter over city, logo top right)  -> livearea bg.png 840x500,
+  KEYART (logo-free tower + helicopter over city, e.g. keyart_nologo.jpg)  -> livearea bg.png 840x500,
                                                             pic0.png 960x544,
                                                             manual page banner strip
 Source JPGs are NOT committed; only the generated PNGs are.
@@ -55,9 +55,10 @@ def main(logo, dome, key):
     indexed(dome_icon(dome), SYS / "icon0.png")
     # Gate (startup.png): Vita draws its own Start label over the bottom ~40 px.
     indexed(cover(logo, 280, 158, cx=0.52, cy=0.5, inset=0.035), LA / "startup.png")
-    # LiveArea card: tower stays on the left; the template's a3 style puts
-    # the gate on the right, over the sky.
-    indexed(cover(key, 840, 500, cx=0.515), LA / "bg.png")
+    # LiveArea card: use the logo-free key art. Tower stays on the left
+    # (x ~45-350); template style a5 puts the gate at x 520-800, y 105-263,
+    # over open sky.
+    indexed(cover(key, 840, 500, cx=0.5), LA / "bg.png")
     indexed(cover(key, 960, 544), SYS / "pic0.png")
     # In-game splash (missing-EXE / boot error screen) uses pic0-sized art.
     for p in (SYS / "icon0.png", LA / "startup.png", LA / "bg.png", SYS / "pic0.png"):

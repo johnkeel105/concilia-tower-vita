@@ -490,3 +490,17 @@ Build/package validated; Tyler will confirm v0.9 on hardware. No release/push.
   as a solid blue screen through loading) with small light-gray "Loading..."
   bottom-right, presented before sprite decode.
 * Tools and Tower Info keep their v0.10 default positions.
+
+## v0.12: Start gate on the right (LiveArea style a5), logo-free key art (APP_VER 00.12)
+
+* Hardware showed style `a3` centres the gate (x 280-560 on the 840x500 card),
+  covering the tower's right edge and the helicopter. Firmware LiveArea layout
+  data (`vs0:vsh/shell/livearea/*.rco`, as extracted by LiveAreaDesigner) gives
+  the gate centre per style: a1 (0,+32); a2/a3/a4 (0,+66), all centred;
+  **a5 (+240,+66)**; psmobile (+240,+16, PSM-specific). The a3 prediction
+  matched the photo to a few pixels, so v0.12 uses **a5**: gate at
+  x 520-800, y 105-263, over open sky. a5's seven frames are left undeclared
+  (empty).
+* `bg.png` and `pic0.png` now come from the logo-free key art
+  (`keyart_nologo.jpg`): tower on the left, sky on the right. The logo lives
+  only in the gate (`startup.png`).
