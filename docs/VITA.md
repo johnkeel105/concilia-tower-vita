@@ -517,3 +517,16 @@ Build/package validated; Tyler will confirm v0.9 on hardware. No release/push.
   `python3 tools/manual_gen.py --bg /path/to/readme_silhouette.jpg`; a plain
   `python3 tools/manual_gen.py` reuses the stored background.
 * The in-game Help manual window is unchanged (text-only, game UI style).
+
+## v0.14: D-pad focus no longer moves the pointer (APP_VER 00.14)
+
+* Bug: in dialogs and menus (e.g. an Inspect window), each D-pad focus step
+  and every Circle/Cross confirm warped the virtual pointer onto the focused
+  button, so the Inspect (magnifying glass) cursor ended up away from where
+  the player was inspecting.
+* Fix: focus is highlight-only (yellow box). Confirm synthesizes a hover and
+  click at the focused control, then restores the game's pointer position;
+  the drawn pointer never moves. Applies to every focus surface: inspect /
+  person / elevator / finance windows, save/load and rename dialogs, top menus
+  (including Tool Sizing), modals, Find, and the manual. Fine D-pad nudging
+  and build grid steps only happen when no UI has focus.

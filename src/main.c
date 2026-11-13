@@ -11582,7 +11582,7 @@ int main(int argc, char *argv[])
 #ifdef __vita__
     game.tool_x=MAP_WIN_W+12;game.tool_y=MENU_BAR_H+8;
     game.info_x=game.screen_w-(int)lroundf(INFO_BAR_W*1.1f);
-    CT_BOOT("UI v0.13 Tools=%d%% (Tool Sizing) Tower Info=1.10 Map/menu/dialogs=1.00; cached GPU panels, nearest",tool_size_pct);
+    CT_BOOT("UI v0.14 Tools=%d%% (Tool Sizing) Tower Info=1.10 Map/menu/dialogs=1.00; cached GPU panels, nearest",tool_size_pct);
 #endif
     game.win_dragging = 0;
     game.tool_popup = -1;

@@ -124,7 +124,7 @@ void vita_boot_begin(void)
     /* Keep last run available even if the new run fails very early. */
     sceIoRemove(CT_DATA_DIR "/boot.previous.log");
     sceIoRename(CT_DATA_DIR "/boot.log", CT_DATA_DIR "/boot.previous.log");
-    vita_boot_log("Vita Tower v0.13 APP_VER=00.13 build=%s: app start", CT_BUILD_VERSION);
+    vita_boot_log("Vita Tower v0.14 APP_VER=00.14 build=%s: app start", CT_BUILD_VERSION);
     vita_boot_log("kernel process clock available; mkdir ux0:data=0x%08x data dir=0x%08x; log writable=%d",
                   data_rc, dir_rc, log_writable);
     vita_boot_log("newlib heap=%u MiB; startup diagnostics use no SDL/GL", _newlib_heap_size_user >> 20);
@@ -255,7 +255,7 @@ void vita_init_runtime(void)
     int rc=sceTouchSetSamplingState(SCE_TOUCH_PORT_FRONT,SCE_TOUCH_SAMPLING_STATE_START);
     memset(&front_panel,0,sizeof(front_panel));
     int panel_rc=sceTouchGetPanelInfo(SCE_TOUCH_PORT_FRONT,&front_panel);
-    vita_boot_log("input v0.13: LEFT=camera RIGHT=cursor D-pad=fine pointer Cross/R=left-drag L=right Circle=Hand Triangle=Inspect Square=Bulldozer Start=menu; UI D-pad=focus Cross/Circle=confirm Triangle=cancel; build D-pad=one cell/floor repeat; controller=%p",(void*)controller);
+    vita_boot_log("input v0.14: LEFT=camera RIGHT=cursor D-pad=fine pointer Cross/R=left-drag L=right Circle=Hand Triangle=Inspect Square=Bulldozer Start=menu; UI D-pad=focus Cross/Circle=confirm Triangle=cancel; build D-pad=one cell/floor repeat; controller=%p",(void*)controller);
     vita_boot_log("front touch manual normalized->960x544; SDL synthetic mouse disabled; sampling=0x%x panel=0x%x area=%d,%d..%d,%d",rc,panel_rc,front_panel.minAaX,front_panel.minAaY,front_panel.maxAaX,front_panel.maxAaY);
 }
 void vita_input_event(const SDL_Event *ev,CT_InputSink sink)
@@ -360,7 +360,7 @@ void vita_boot_notice(const char *message)
     reserve_error_frame();
     if (error_frame_reserved) sceDisplaySetFrameBuf(&error_frame, SCE_DISPLAY_SETBUF_NEXTFRAME);
     if (debug_screen_active)
-        psvDebugScreenPrintf("\e[2J\e[1;1HVita Tower v0.13\n\n%s\n\nLog: ux0:data/concilia-tower/boot.log\n", message);
+        psvDebugScreenPrintf("\e[2J\e[1;1HVita Tower v0.14\n\n%s\n\nLog: ux0:data/concilia-tower/boot.log\n", message);
 }
 
 void vita_boot_notice_end(void)
@@ -380,7 +380,7 @@ int vita_boot_fatal(const char *reason)
     int rc = error_frame_reserved ? sceDisplaySetFrameBuf(&error_frame, SCE_DISPLAY_SETBUF_NEXTFRAME) : -1;
     vita_boot_log("reserved direct framebuffer error screen restore=0x%08x", rc);
     if (rc >= 0) {
-        psvDebugScreenPrintf("\e[2J\e[1;1HVita Tower v0.13 - startup stopped\n\n%s\nSDL diagnostic (may be stale): %s\n\n", reason, error);
+        psvDebugScreenPrintf("\e[2J\e[1;1HVita Tower v0.14 - startup stopped\n\n%s\nSDL diagnostic (may be stale): %s\n\n", reason, error);
         psvDebugScreenPrintf("Log: ux0:data/concilia-tower/boot.log\nLog writable: %s\n\n", log_writable ? "yes" : "NO - check free space/write access");
         psvDebugScreenPrintf("EXE search (FOUND = detected, not yet validated):\n%s\n", search_report);
         psvDebugScreenPrintf("\nSend boot.log and a photo of this screen.\nRelease buttons, then press START or Circle to exit.\n");

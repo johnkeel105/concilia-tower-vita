@@ -139,14 +139,27 @@ static void vita_ui_close_target(void)
     else if(ui_surface==18) game.win_map=0;
     else vita_cancel_surface();
 }
+/* Highlight-only focus: D-pad focus and Circle/Cross confirm never move the
+ * virtual pointer. A confirm synthesizes hover+click at the focused control,
+ * then restores the game's pointer state, so e.g. the Inspect cursor stays
+ * exactly where it was when the window opened (v0.14). */
+static void vita_ui_click_at(int x,int y)
+{
+    int ox=game.mouse_x,oy=game.mouse_y;
+    SDL_Event e;SDL_zero(e);
+    e.type=SDL_MOUSEMOTION;e.motion.x=x;e.motion.y=y;e.motion.xrel=x-ox;e.motion.yrel=y-oy;handle_event_native(&e);
+    SDL_zero(e);e.type=SDL_MOUSEBUTTONDOWN;e.button.button=SDL_BUTTON_LEFT;e.button.state=SDL_PRESSED;e.button.clicks=1;e.button.x=x;e.button.y=y;
+    handle_event_native(&e);e.type=SDL_MOUSEBUTTONUP;e.button.state=SDL_RELEASED;handle_event_native(&e);
+    /* Restore position only (no motion event: that could re-hover/switch a
+     * menu under the old pointer). The drawn pointer itself never moved. */
+    game.mouse_x=ox;game.mouse_y=oy;game.menu_bar_hover=menu_bar_hit_test(ox,oy);
+}
 static void vita_ui_confirm(void)
 {
     if(!vita_ui_collect()) return;
     if(ui_target_action[ui_focus_index]) { vita_ui_close_target();return; }
-    SDL_Rect r=ui_targets[ui_focus_index];int x=r.x+r.w/2,y=r.y+r.h/2;
-    vita_pointer_move(x,y,handle_event_native);
-    SDL_Event e;SDL_zero(e);e.type=SDL_MOUSEBUTTONDOWN;e.button.button=SDL_BUTTON_LEFT;e.button.state=SDL_PRESSED;e.button.clicks=1;e.button.x=x;e.button.y=y;
-    handle_event_native(&e);e.type=SDL_MOUSEBUTTONUP;e.button.state=SDL_RELEASED;handle_event_native(&e);
+    SDL_Rect r=ui_targets[ui_focus_index];
+    vita_ui_click_at(r.x+r.w/2,r.y+r.h/2);
 }
 static void vita_ui_navigate(int dir)
 {
@@ -154,7 +167,7 @@ static void vita_ui_navigate(int dir)
     if(game.menu_open>=0 && dir<2) {
         game.menu_open=(game.menu_open+(dir==0?-1:1)+TOP_MENU_COUNT)%TOP_MENU_COUNT;game.menu_hover=-1;vita_ui_collect();
     } else ui_focus_index=CT_UIFocusNext(ui_targets,ui_count,ui_focus_index,dir);
-    SDL_Rect r=ui_targets[ui_focus_index];vita_pointer_move(r.x+r.w/2,r.y+r.h/2,handle_event_native);
+    /* No pointer warp: the yellow focus box is the only indicator. */
 }
 static void vita_ui_focus_draw(void)
 {
