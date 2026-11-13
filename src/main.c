@@ -623,6 +623,9 @@ typedef struct {
 #define ACT_MODE_SANDBOX  10
 #define ACT_FINANCE       11
 #define ACT_SAVE_AS       32
+#define ACT_TOOLSIZE_100  33   /* Vita: Tool Sizing menu */
+#define ACT_TOOLSIZE_125  34
+#define ACT_TOOLSIZE_150  35
 #define ACT_SAVE          12
 #define ACT_LOAD          13
 #define ACT_EXPORT_TDT    14
@@ -773,9 +776,21 @@ static const MenuItem menu_windows[] = {
 /* Help menu — the original's Help (SimTower.HLP) is a WinHelp file we
  * can't render; point at the scanned 1994 user's manual instead. */
 #define MANUAL_URL "https://archive.org/details/SimTower_-_Manual_-_PC"
+#ifdef __vita__
+static const MenuItem menu_help[] = {
+    { "Vita Tower Manual", ITEM_NONE, ACT_MANUAL },
+};
+static const MenuItem menu_toolsize[] = {
+    { "Original size",  ITEM_NONE, ACT_TOOLSIZE_100 },
+    { "25% larger",     ITEM_NONE, ACT_TOOLSIZE_125 },
+    { "50% larger",     ITEM_NONE, ACT_TOOLSIZE_150 },
+};
+#define MENU_TOOLSIZE_COUNT 3
+#else
 static const MenuItem menu_help[] = {
     { "SimTower Manual (1994)", ITEM_NONE, ACT_MANUAL },
 };
+#endif
 #define MENU_HELP_COUNT 1
 
 /* Top-level menus */
@@ -795,9 +810,12 @@ static const TopMenu top_menus[] = {
     { "Options",    menu_options,     MENU_OPTIONS_COUNT },
     { "Windows",    menu_windows,     MENU_WINDOWS_COUNT },
     { "View",       menu_view,        MENU_VIEW_COUNT },
+#ifdef __vita__
+    { "Tool Sizing", menu_toolsize,   MENU_TOOLSIZE_COUNT },
+#endif
     { "Help",       menu_help,        MENU_HELP_COUNT },
 };
-#define TOP_MENU_COUNT 10
+#define TOP_MENU_COUNT ((int)(sizeof(top_menus)/sizeof(top_menus[0])))
 
 /* Width of a top-level menu label cell. ONE definition: the bar drawing,
  * the bar hit-test and the dropdown anchor all use it. They used to
@@ -854,6 +872,10 @@ static CT_UIScale ui_scale;
 static void vita_ui_focus_draw(void);
 static int vita_ui_collect(void);
 static int vita_scaled_ui=1;
+static int tool_size_pct=125;              /* Tool Sizing: 100 / 125 / 150 */
+static int manual_open,manual_section,manual_scroll,manual_drag_y=-1;
+static float manual_stick;
+#include "manual_text.h"
 #endif
 
 /* ---------- Coordinate conversion ---------- */
@@ -5287,13 +5309,24 @@ static void tool_button_rect(int i, int *bx, int *by)
 
 #ifdef __vita__
 static int tool_popup_width(void) { return game.tool_popup>=0 ? TOOL_WIN_W+40 : TOOL_WIN_W; }
+/* Requested Tool Sizing, reduced only as far as needed to keep the whole
+ * Tools window (and an open flyout) on the 960x544 screen. */
+static float tool_effective_scale(void)
+{
+    if(!vita_scaled_ui) return 1.0f;
+    float s=tool_size_pct/100.0f;
+    float fit_h=(float)(544-MENU_BAR_H)/tool_win_height(),fit_w=960.0f/tool_popup_width();
+    if(s>fit_h) s=fit_h;
+    if(s>fit_w) s=fit_w;
+    return s<1.0f?1.0f:s;
+}
 static CT_UIPanel tool_panel(void)
-{ return CT_UIPanelGeometry((SDL_Rect){game.tool_x,game.tool_y,tool_popup_width(),tool_win_height()},vita_scaled_ui?1.25f:1.0f); }
+{ return CT_UIPanelGeometry((SDL_Rect){game.tool_x,game.tool_y,tool_popup_width(),tool_win_height()},tool_effective_scale()); }
 static CT_UIPanel info_panel(void)
 { return CT_UIPanelGeometry((SDL_Rect){game.info_x,game.info_y,INFO_BAR_W,WIN_TITLEBAR_H+INFO_BAR_H},vita_scaled_ui?1.1f:1.0f); }
 static void clamp_vita_panels(void)
 {
-    CT_UIPanelClamp(&game.tool_x,&game.tool_y,tool_popup_width(),tool_win_height(),vita_scaled_ui?1.25f:1,MENU_BAR_H);
+    CT_UIPanelClamp(&game.tool_x,&game.tool_y,tool_popup_width(),tool_win_height(),tool_effective_scale(),MENU_BAR_H);
     CT_UIPanelClamp(&game.info_x,&game.info_y,INFO_BAR_W,WIN_TITLEBAR_H+INFO_BAR_H,vita_scaled_ui?1.1f:1,MENU_BAR_H);
     if(game.elv_open) CT_UIPanelClamp(&game.elv_x,&game.elv_y,ELV_DLG_W,WIN_TITLEBAR_H+ELV_DLG_H+ELV_RIDERS_H,1,MENU_BAR_H);
     if(game.fin_open) CT_UIPanelClamp(&game.fin_x,&game.fin_y,FIN_DLG_W,WIN_TITLEBAR_H+FIN_DLG_H,1,MENU_BAR_H);
@@ -5665,6 +5698,11 @@ static void render_dropdown(void)
         if (tm->items[i].action == ACT_DEBUG_TOGGLE && game.show_debug) checked = 1;
         if (tm->items[i].action == ACT_MODE_CAMPAIGN && game.sim.mode == MODE_CAMPAIGN) checked = 1;
         if (tm->items[i].action == ACT_MODE_SANDBOX && game.sim.mode == MODE_SANDBOX) checked = 1;
+#ifdef __vita__
+        if (tm->items[i].action == ACT_TOOLSIZE_100 && tool_size_pct == 100) checked = 1;
+        if (tm->items[i].action == ACT_TOOLSIZE_125 && tool_size_pct == 125) checked = 1;
+        if (tm->items[i].action == ACT_TOOLSIZE_150 && tool_size_pct == 150) checked = 1;
+#endif
         if (tm->items[i].action == ACT_WIN_TOOLBAR && game.win_toolbar) checked = 1;
         if (tm->items[i].action == ACT_WIN_INFOBAR && game.win_infobar) checked = 1;
         if (tm->items[i].action == ACT_WIN_MAP && game.win_map) checked = 1;
@@ -5717,7 +5755,11 @@ static void render_ui(void)
     /* Update window title with current state (for VNC title bar) */
     char title[256];
     snprintf(title, sizeof(title),
+#ifdef __vita__
+             "Vita Tower | %s | $%ld | %d★ | Pop: %d | Day %d | Build: %s",
+#else
              "ConciliaTower | %s | $%ld | %d★ | Pop: %d | Day %d | Build: %s",
+#endif
              game.sim.mode == MODE_SANDBOX ? "Sandbox" : "Campaign",
              game.tower.money, game.tower.star_rating, game.tower.population,
              game.tower.day, tower_item_name(game.build_type));
@@ -8425,6 +8467,136 @@ static void find_dialog_click(int mx, int my, int clicks)
     }
 }
 
+#ifdef __vita__
+/* ---- Vita prefs (ux0:data/concilia-tower/prefs.cfg) ---- */
+#define CT_PREFS_PATH CT_VITA_SAVE_DIR "/prefs.cfg"
+static void vita_prefs_load(void)
+{
+    FILE *f=fopen(CT_PREFS_PATH,"r");int v=0;
+    if(f) { char line[64];while(fgets(line,sizeof line,f)) sscanf(line,"tool_size=%d",&v);fclose(f); }
+    if(v==100 || v==125 || v==150) tool_size_pct=v;
+    CT_BOOT("prefs %s: tool_size=%d%s",CT_PREFS_PATH,tool_size_pct,f?"":" (default; no prefs file)");
+}
+static void vita_prefs_save(void)
+{
+    CT_SaveDirectoryCreate(CT_VITA_SAVE_DIR);
+    FILE *f=fopen(CT_PREFS_PATH ".tmp","w");int ok=f!=NULL;
+    if(f) { ok=fprintf(f,"tool_size=%d\n",tool_size_pct)>0;if(fclose(f)!=0) ok=0; }
+    if(ok) { remove(CT_PREFS_PATH);ok=rename(CT_PREFS_PATH ".tmp",CT_PREFS_PATH)==0; }
+    CT_BOOT("prefs saved %s tool_size=%d ok=%d",CT_PREFS_PATH,tool_size_pct,ok);
+}
+static void set_tool_size(int pct)
+{
+    tool_size_pct=pct;game.tool_popup=-1;clamp_vita_panels();vita_prefs_save();
+    char msg[64];snprintf(msg,sizeof msg,"Tool Sizing: %s",pct==100?"original size":pct==125?"25% larger":"50% larger");
+    add_event_message(msg);
+}
+
+/* ---- Vita in-game manual (text in vita/manual/manual.txt) ---- */
+#define MANUAL_X 150
+#define MANUAL_Y 40
+#define MANUAL_W 660
+#define MANUAL_H 470
+#define MANUAL_LINE_H 17
+#define MANUAL_TEXT_Y (MANUAL_Y+WIN_TITLEBAR_H+30)
+#define MANUAL_ROWS ((MANUAL_H-WIN_TITLEBAR_H-30-44)/MANUAL_LINE_H)
+enum { MANUAL_BTN_CLOSE, MANUAL_BTN_PREV, MANUAL_BTN_NEXT, MANUAL_BTN_UP, MANUAL_BTN_DOWN, MANUAL_BTN_COUNT };
+static SDL_Rect manual_button(int i)
+{
+    static const int xs[MANUAL_BTN_COUNT]={MANUAL_W-102,12,120,250,340};
+    static const int ws[MANUAL_BTN_COUNT]={90,100,100,80,80};
+    return (SDL_Rect){MANUAL_X+xs[i],MANUAL_Y+MANUAL_H-34,ws[i],24};
+}
+static int manual_max_scroll(void) { return SDL_max(0,ct_manual[manual_section].count-MANUAL_ROWS); }
+static void manual_scroll_by(int d) { manual_scroll=SDL_max(0,SDL_min(manual_scroll+d,manual_max_scroll())); }
+static void manual_set_section(int s)
+{ manual_section=(s+CT_MANUAL_SECTIONS)%CT_MANUAL_SECTIONS;manual_scroll=0;manual_stick=0; }
+static void manual_open_window(void)
+{
+    manual_open=1;manual_drag_y=-1;game.menu_open=-1;game.tool_popup=-1;
+    game.dragging=game.cap_drag=0;audio_stop_loop();manual_set_section(manual_section);
+    CT_BOOT("manual opened section=%d",manual_section);
+}
+static void manual_close(void) { manual_open=0;manual_drag_y=-1;vita_right_stick_scroll(0); }
+static void render_manual(void)
+{
+    if(!manual_open) return;
+    const CT_ManualSection *sec=&ct_manual[manual_section];
+    draw_win31_titlebar(MANUAL_X,MANUAL_Y,MANUAL_W,"Vita Tower Manual");
+    draw_win31_rect(MANUAL_X,MANUAL_Y+WIN_TITLEBAR_H,MANUAL_W,MANUAL_H-WIN_TITLEBAR_H,1);
+    SDL_Color ink={0,0,0,255},navy={0,0,128,255},dim={90,90,90,255};
+    char head[96];snprintf(head,sizeof head,"%d/%d  %s",manual_section+1,CT_MANUAL_SECTIONS,sec->title);
+    stats_label(MANUAL_X+12,MANUAL_Y+WIN_TITLEBAR_H+7,head,navy);
+    stats_label(MANUAL_X+MANUAL_W-250,MANUAL_Y+WIN_TITLEBAR_H+7,"D-pad L/R: section  Up/Down: scroll",dim);
+    SDL_Rect page={MANUAL_X+8,MANUAL_TEXT_Y-4,MANUAL_W-16,MANUAL_ROWS*MANUAL_LINE_H+8};
+    SDL_SetRenderDrawColor(game.renderer,255,255,255,255);SDL_RenderFillRect(game.renderer,&page);
+    SDL_SetRenderDrawColor(game.renderer,90,90,90,255);SDL_RenderDrawRect(game.renderer,&page);
+    for(int r=0;r<MANUAL_ROWS && manual_scroll+r<sec->count;r++) {
+        const char *line=sec->lines[manual_scroll+r];
+        if(line[0]) stats_label(MANUAL_X+16,MANUAL_TEXT_Y+r*MANUAL_LINE_H,line,ink);
+    }
+    if(manual_max_scroll()>0) {   /* scroll position bar */
+        int track=page.h-4,thumb=SDL_max(12,track*MANUAL_ROWS/sec->count);
+        int ty=page.y+2+(track-thumb)*manual_scroll/manual_max_scroll();
+        SDL_Rect bar={page.x+page.w-8,ty,5,thumb};SDL_SetRenderDrawColor(game.renderer,0,0,128,255);SDL_RenderFillRect(game.renderer,&bar);
+    }
+    static const char *labels[MANUAL_BTN_COUNT]={"Close","< Section","Section >","Up","Down"};
+    for(int i=0;i<MANUAL_BTN_COUNT;i++) {
+        int enabled=i==MANUAL_BTN_UP?manual_scroll>0:i==MANUAL_BTN_DOWN?manual_scroll<manual_max_scroll():1;
+        draw_btn31(manual_button(i),labels[i],i==MANUAL_BTN_CLOSE,enabled);
+    }
+}
+static void manual_event(SDL_Event *ev)
+{
+    switch(ev->type) {
+    case SDL_QUIT: game.running=0;break;
+    case SDL_MOUSEWHEEL: manual_scroll_by(-ev->wheel.y*3);break;
+    case SDL_KEYDOWN:
+        switch(ev->key.keysym.sym) {
+        case SDLK_ESCAPE: case SDLK_F10: manual_close();break;
+        case SDLK_UP: manual_scroll_by(-1);break;
+        case SDLK_DOWN: manual_scroll_by(1);break;
+        case SDLK_PAGEUP: manual_scroll_by(-MANUAL_ROWS);break;
+        case SDLK_PAGEDOWN: manual_scroll_by(MANUAL_ROWS);break;
+        case SDLK_LEFT: manual_set_section(manual_section-1);break;
+        case SDLK_RIGHT: manual_set_section(manual_section+1);break;
+        default: break;
+        }
+        break;
+    case SDL_MOUSEBUTTONDOWN:
+        if(ev->button.button==SDL_BUTTON_RIGHT) { manual_set_section(manual_section-1);break; } /* L trigger */
+        if(ev->button.button!=SDL_BUTTON_LEFT) break;
+        for(int i=0;i<MANUAL_BTN_COUNT;i++) if(point_in_rect(ev->button.x,ev->button.y,manual_button(i))) {
+            if(i==MANUAL_BTN_CLOSE) manual_close();
+            else if(i==MANUAL_BTN_PREV) manual_set_section(manual_section-1);
+            else if(i==MANUAL_BTN_NEXT) manual_set_section(manual_section+1);
+            else manual_scroll_by(i==MANUAL_BTN_UP?-MANUAL_ROWS/2:MANUAL_ROWS/2);
+            return;
+        }
+        if(point_in_rect(ev->button.x,ev->button.y,(SDL_Rect){MANUAL_X,MANUAL_TEXT_Y,MANUAL_W,MANUAL_ROWS*MANUAL_LINE_H}))
+            manual_drag_y=ev->button.y;     /* touch/pointer drag scrolls */
+        break;
+    case SDL_MOUSEMOTION:
+        if(manual_drag_y>=0 && (ev->motion.state&SDL_BUTTON_LMASK)) {
+            int lines=(manual_drag_y-ev->motion.y)/MANUAL_LINE_H;
+            if(lines) { manual_scroll_by(lines);manual_drag_y-=lines*MANUAL_LINE_H; }
+        }
+        break;
+    case SDL_MOUSEBUTTONUP: manual_drag_y=-1;break;
+    }
+}
+/* Right stick scrolls the manual (about 12 lines per second at full tilt). */
+static void manual_stick_update(double dt)
+{
+    if(!manual_open) return;
+    int ry=vita_right_stick_y();
+    float a=fabsf((float)ry)<8000?0:(ry>0?1:-1)*SDL_min(1.0f,(fabsf((float)ry)-8000)/24767.0f);
+    manual_stick+=a*12.0f*(float)dt;
+    int lines=(int)manual_stick;
+    if(lines) { manual_scroll_by(lines);manual_stick-=lines; }
+}
+#endif
+
 static void render(void)
 {
 #ifdef __vita__
@@ -8513,6 +8685,7 @@ static void render(void)
     render_quit_confirm();     /* topmost — quitting outranks all */
 #ifdef __vita__
     render_save_dialog();
+    render_manual();
 #endif
 
 #ifdef __vita__
@@ -8889,8 +9062,8 @@ static int titlebar_hit_test(int mx, int my)
 #ifdef __vita__
     CT_UIPanel info=info_panel(),tools=tool_panel();
     info.dst.h=(int)lroundf(WIN_TITLEBAR_H*(vita_scaled_ui?1.1f:1));
-    tools.dst.h=(int)lroundf(WIN_TITLEBAR_H*(vita_scaled_ui?1.25f:1));
-    tools.dst.w=(int)lroundf(TOOL_WIN_W*(vita_scaled_ui?1.25f:1));
+    tools.dst.h=(int)lroundf(WIN_TITLEBAR_H*tool_effective_scale());
+    tools.dst.w=(int)lroundf(TOOL_WIN_W*tool_effective_scale());
     if(game.win_infobar && CT_UIPanelHit(info,mx,my)) return 1;
     if(game.win_toolbar && CT_UIPanelHit(tools,mx,my)) return 3;
 #endif
@@ -9309,9 +9482,18 @@ static void execute_menu_item(const MenuItem *item)
         break;
     case ACT_MASS_PRICING: game.show_masspricing ^= 1; break;
     case ACT_MANUAL:
+#ifdef __vita__
+        manual_open_window();
+#else
         open_url(MANUAL_URL);
         add_event_message("Opening the 1994 manual in a new tab...");
+#endif
         break;
+#ifdef __vita__
+    case ACT_TOOLSIZE_100: set_tool_size(100); break;
+    case ACT_TOOLSIZE_125: set_tool_size(125); break;
+    case ACT_TOOLSIZE_150: set_tool_size(150); break;
+#endif
     case ACT_ANIM_PEOPLE:  game.anim_people ^= 1;  break;
     case ACT_ANIM_EFFECTS: game.anim_effects ^= 1; break;
     case ACT_SND_ELEV:     game.snd_elev ^= 1;   break;
@@ -9439,6 +9621,7 @@ static void cap_drag_track(void)
 #ifdef __vita__
 static int vita_cancel_surface(void)
 {
+    if(manual_open) { manual_close();return 1; }
     if(save_dialog_mode) { save_dialog_mode=0;return 1; }
     if(game.quit_confirm) { game.quit_confirm=0;game.sim.speed=game.quit_saved_speed;return 1; }
     if(game.route_confirm) { route_confirm_close();return 1; }
@@ -9487,6 +9670,7 @@ static void handle_event(SDL_Event *ev)
     }
 #endif
 #ifdef __vita__
+    if(manual_open) { manual_event(ev);return; }
     if(save_dialog_mode) { save_dialog_event(ev);return; }
 #endif
     /* Quit save-prompt: fully modal, topmost. */
@@ -10416,6 +10600,7 @@ int main(int argc, char *argv[])
             (unsigned)sizeof(game), (unsigned)sizeof(long), (unsigned)sizeof(void*));
     vita_boost_clocks();
     vita_prepare_userdata();
+    vita_prefs_load();
     vita_try_expand_ex_();
 #endif
     
@@ -10494,7 +10679,7 @@ int main(int argc, char *argv[])
 #define CT_BUILD_VERSION "dev"
 #endif
 #ifdef __vita__
-    printf("ConciliaTower — SimTower for PS Vita (build %s)\n", CT_BUILD_VERSION);
+    printf("Vita Tower — SimTower for PS Vita (build %s)\n", CT_BUILD_VERSION);
 #else
     printf("ConciliaTower — SimTower for Linux (build %s)\n", CT_BUILD_VERSION);
 #endif
@@ -10606,7 +10791,12 @@ int main(int argc, char *argv[])
     SDL_ClearError();
 #endif
     CT_BOOT("SDL_CreateWindow (native) begin: %dx%d flags=0x%x", WINDOW_W, WINDOW_H, (unsigned)wflags);
-    game.window = SDL_CreateWindow("Concilia Tower",
+    game.window = SDL_CreateWindow(
+#ifdef __vita__
+                                   "Vita Tower",
+#else
+                                   "Concilia Tower",
+#endif
         SDL_WINDOWPOS_CENTERED, SDL_WINDOWPOS_CENTERED,
         WINDOW_W, WINDOW_H, wflags);
     if (!game.window) return CT_FAIL("SDL_CreateWindow failed.");
@@ -11370,7 +11560,7 @@ int main(int argc, char *argv[])
 #ifdef __vita__
     game.tool_x=MAP_WIN_W+12;game.tool_y=MENU_BAR_H+8;
     game.info_x=game.screen_w-(int)lroundf(INFO_BAR_W*1.1f);
-    CT_BOOT("UI v0.9 Tools=1.25 Tower Info=1.10 Map/menu/dialogs=1.00; cached GPU panels, nearest");
+    CT_BOOT("UI v0.10 Tools=%d%% (Tool Sizing) Tower Info=1.10 Map/menu/dialogs=1.00; cached GPU panels, nearest",tool_size_pct);
 #endif
     game.win_dragging = 0;
     game.tool_popup = -1;
@@ -11411,7 +11601,11 @@ int main(int argc, char *argv[])
     }
     if (getenv("CT_MODE")) game.sim.mode = atoi(getenv("CT_MODE"));
 
+#ifdef __vita__
+    add_event_message("Welcome to Vita Tower! Help > Vita Tower Manual for controls.");
+#else
     add_event_message("Welcome to ConciliaTower!");
+#endif
     add_event_message("Click to build your tower.");
     
     /* Build demo tower only if --demo flag is passed */
@@ -11698,6 +11892,8 @@ int main(int argc, char *argv[])
         }
 #ifdef __vita__
         vita_ui_navigation(vita_ui_collect()?1:game.build_type!=ITEM_NONE?2:0);
+        vita_right_stick_scroll(manual_open);
+        manual_stick_update(frame_dt);
         if(vita_update_input(frame_dt,&game.cam_fx,&game.cam_fy,handle_event)) game.cam_anim=0;
         clamp_camera();
         screen_to_grid(game.mouse_x,game.mouse_y,&game.mouse_floor,&game.mouse_cell);
@@ -11764,7 +11960,7 @@ int main(int argc, char *argv[])
          * clobbering the mode's isolated shaft flags. */
         if (!game.find_open && !game.elv_edit_mode
 #ifdef __vita__
-            && !save_dialog_mode
+            && !save_dialog_mode && !manual_open
 #endif
         ) {
             int prev_hour = game.sim.hour;

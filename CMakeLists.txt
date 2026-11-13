@@ -15,9 +15,9 @@ find_package(SDL2 REQUIRED)
 find_package(SDL2_ttf REQUIRED)
 find_package(Freetype REQUIRED)
 
-set(VITA_APP_NAME "Concilia Tower")
+set(VITA_APP_NAME "Vita Tower")
 set(VITA_TITLEID  "CTWR00001")
-set(VITA_VERSION  "00.09")
+set(VITA_VERSION  "00.10")
 
 execute_process(
   COMMAND git describe --always --dirty
@@ -131,6 +131,12 @@ vita_create_vpk(${PROJECT_NAME}.vpk ${VITA_TITLEID} ${PROJECT_NAME}.self
   FILE vita/sce_sys/livearea/contents/bg.png sce_sys/livearea/contents/bg.png
   FILE vita/sce_sys/livearea/contents/startup.png sce_sys/livearea/contents/startup.png
   FILE vita/sce_sys/livearea/contents/template.xml sce_sys/livearea/contents/template.xml
+  FILE vita/sce_sys/manual/001.png sce_sys/manual/001.png
+  FILE vita/sce_sys/manual/002.png sce_sys/manual/002.png
+  FILE vita/sce_sys/manual/003.png sce_sys/manual/003.png
+  FILE vita/sce_sys/manual/004.png sce_sys/manual/004.png
+  FILE vita/sce_sys/manual/005.png sce_sys/manual/005.png
+  FILE vita/sce_sys/manual/006.png sce_sys/manual/006.png
   FILE web/fonts/LiberationSans-Bold.ttf fonts/LiberationSans-Bold.ttf
   FILE web/fonts/LiberationSans-Regular.ttf fonts/LiberationSans-Regular.ttf
 )

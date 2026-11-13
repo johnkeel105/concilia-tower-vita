@@ -34,6 +34,8 @@ void vita_input_event(const SDL_Event *,CT_InputSink);
 int vita_update_input(double dt,float *,float *,CT_InputSink);
 void vita_draw_cursor(SDL_Renderer *,int);
 void vita_ui_navigation(int);
+void vita_right_stick_scroll(int);
+int vita_right_stick_y(void);
 void vita_pointer_move(int,int,CT_InputSink);
 void vita_load_cursors(SDL_Renderer *,NEResourceTable *);
 void vita_present(SDL_Renderer *);

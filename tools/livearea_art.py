@@ -30,7 +30,7 @@ for y in range(118):
     t = y / 117
     color = tuple(round(a + (b - a) * t) for a, b in zip((13, 18, 40), (43, 37, 70)))
     draw.line((0, y, 279, y), fill=color)
-draw.text((140, 17), "Concilia Tower", font=font(26), fill=CREAM, anchor="mt")
+draw.text((140, 17), "Vita Tower", font=font(30), fill=CREAM, anchor="mt")
 draw.text((140, 65), "PS Vita", font=font(22), fill=GOLD, anchor="mt")
 # Small lit towers frame the platform label without intruding on either label.
 for x in (12, 242):

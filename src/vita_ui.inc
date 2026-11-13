@@ -21,14 +21,17 @@ static SDL_Rect ui_panel_rect(CT_UIPanel p,SDL_Rect r)
 }
 static int vita_transient_ui(void)
 {
-    return save_dialog_mode || game.quit_confirm || game.route_confirm || game.notice_modal || game.disaster_modal ||
+    return manual_open || save_dialog_mode || game.quit_confirm || game.route_confirm || game.notice_modal || game.disaster_modal ||
         game.name_edit_open || game.movie_dlg_open || game.find_open || game.menu_open>=0 || game.tool_popup>=0 ||
         game.person_open || game.inspect_open || game.fin_open || game.elv_open || game.show_masspricing || game.show_tuning || game.show_stats;
 }
 static int vita_ui_collect(void)
 {
     ui_count=0;ui_surface=0;int x,y;
-    if(save_dialog_mode) {
+    if(manual_open) {
+        ui_surface=200+manual_section;
+        for(int i=0;i<MANUAL_BTN_COUNT;i++) ui_add(manual_button(i),0);
+    } else if(save_dialog_mode) {
         ui_surface=100+save_dialog_mode+save_dialog_page*3;SDL_Rect r=save_dialog_rect();
         for(int row=0;row<8 && save_dialog_page*8+row<save_dialog_count;row++) ui_box(r.x+14,r.y+72+row*29,r.w-28,26);
         if(save_dialog_page) ui_box(r.x+14,r.y+338,76,26);
@@ -179,6 +182,13 @@ static void handle_event(SDL_Event *ev)
     int active=vita_ui_collect();
     if(ev->type==SDL_KEYDOWN) {
         SDL_Keycode key=ev->key.keysym.sym;
+        if(manual_open) {
+            if(key==SDLK_F16) {manual_set_section(manual_section-1);return;}
+            if(key==SDLK_F17) {manual_set_section(manual_section+1);return;}
+            if(key==SDLK_F18) {manual_scroll_by(-1);return;}
+            if(key==SDLK_F19) {manual_scroll_by(1);return;}
+            if(key==SDLK_F13 || key==SDLK_F14) {manual_close();return;}
+        }
         if(key>=SDLK_F16 && key<=SDLK_F19) {if(active) vita_ui_navigate(key-SDLK_F16);else if(game.build_type!=ITEM_NONE) vita_grid_nudge(key-SDLK_F16);return;}
         if(key==SDLK_F13) {if(vita_transient_ui()) vita_ui_confirm();else select_action_tool(1,0);return;}
         if(key==SDLK_F14 && vita_transient_ui()) {vita_cancel_surface();return;}

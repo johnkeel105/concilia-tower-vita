@@ -1,4 +1,6 @@
-# Concilia Tower on PS Vita (native GXM)
+# Vita Tower on PS Vita (native GXM)
+
+*(Formerly "Concilia Tower"; renamed in v0.10. Title ID CTWR00001 and save folder `ux0:data/concilia-tower/` are unchanged.)*
 
 This tree can be built as a PS Vita `.vpk` using VitaSDK and **sdl2_vitagl**
 (SDL2 Vita backend); the game selects the native GXM renderer, not vitaGL.
@@ -449,3 +451,25 @@ All cursors remain 1x and are drawn after the UI/focus highlight.
 The linker reserves an explicit 16 KiB gap for VitaSDK import/module metadata;
 plain 4 KiB segment alignment could make vita-elf-create fail as code grows.
 Build/package validated; Tyler will confirm v0.9 on hardware. No release/push.
+
+## v0.10: Vita Tower, Tool Sizing, in-game manual (APP_VER 00.10)
+
+* **Rename:** LiveArea/SFO title, launch-gate art, icon and in-game strings now
+  say **Vita Tower**. Title ID stays `CTWR00001`; saves stay in
+  `ux0:data/concilia-tower/`, so existing towers keep working.
+* **Tool Sizing menu** (top menu bar, before Help): *Original size*, *25% larger*
+  (default), *50% larger*. Rescales the Tools window, buttons and tap areas at
+  runtime; the current choice is checkmarked. It is saved as `tool_size=NNN` in
+  `ux0:data/concilia-tower/prefs.cfg` and logged to `boot.log`. If 50% would
+  push the Tools window past the bottom of the screen (many unlocked rows), the
+  scale is reduced only as far as needed to fit. Tower Info is right-aligned and
+  does not overlap; the Map is never resized.
+* **Manual:** Help > *Vita Tower Manual* opens a scrollable in-game manual
+  (6 sections: Controls, Building, Tools and Tower Info, Tool Sizing, Saving and
+  loading, Playing Vita Tower). D-pad up/down or right stick scrolls; D-pad
+  left/right (or L, previous) switches section; Circle/Triangle/Start close;
+  Cross presses the focused button (Close by default); touch the buttons or drag
+  the text. The same text ships as system e-manual pages in
+  `sce_sys/manual/001-006.png` for the LiveArea Manual entry.
+* Source: `vita/manual/manual.txt` -> `python3 tools/manual_gen.py` regenerates
+  `src/manual_text.h` and the 8-bit indexed manual PNGs.
