@@ -473,3 +473,20 @@ Build/package validated; Tyler will confirm v0.9 on hardware. No release/push.
   `sce_sys/manual/001-006.png` for the LiveArea Manual entry.
 * Source: `vita/manual/manual.txt` -> `python3 tools/manual_gen.py` regenerates
   `src/manual_text.h` and the 8-bit indexed manual PNGs.
+
+## v0.11: official art, right-side gate, black boot (APP_VER 00.11)
+
+* **Official Vita Tower art** (Tyler), converted by `tools/brand_art.py`
+  (source JPGs are not committed; only the 8-bit indexed, dithered PNGs):
+  * `sce_sys/icon0.png` 128x128: round dome illustration (bubble mask hides corners)
+  * `sce_sys/livearea/contents/startup.png` 280x158: VITA TOWER logo on sky;
+    logo and tagline sit above the bottom ~40 px where the system draws Start
+  * `sce_sys/livearea/contents/bg.png` 840x500: wide tower and helicopter key art
+  * `sce_sys/pic0.png` 960x544: same key art, shown while the app loads
+* **LiveArea style `a3`** (was `a1`): the Start gate sits on the right of the
+  card, over the sky, leaving the tower on the left visible. Gate position is
+  fixed by the style; verify on hardware.
+* **Boot:** the post-EXE-check screen is black (was navy 14,22,48, which showed
+  as a solid blue screen through loading) with small light-gray "Loading..."
+  bottom-right, presented before sprite decode.
+* Tools and Tower Info keep their v0.10 default positions.

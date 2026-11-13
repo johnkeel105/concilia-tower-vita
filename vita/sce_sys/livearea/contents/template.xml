@@ -1,6 +1,8 @@
 <?xml version="1.0" encoding="utf-8"?>
 
-<livearea style="a1" format-ver="01.00" content-rev="1">
+<!-- Style a3: Start gate on the right of the card (over the sky), so the
+     tower on the left of the key art stays visible. a1 centers the gate. -->
+<livearea style="a3" format-ver="01.00" content-rev="1">
 	<livearea-background>
 		<image>bg.png</image>
 	</livearea-background>

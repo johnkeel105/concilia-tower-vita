@@ -17,7 +17,7 @@ find_package(Freetype REQUIRED)
 
 set(VITA_APP_NAME "Vita Tower")
 set(VITA_TITLEID  "CTWR00001")
-set(VITA_VERSION  "00.10")
+set(VITA_VERSION  "00.11")
 
 execute_process(
   COMMAND git describe --always --dirty
@@ -128,6 +128,7 @@ vita_create_vpk(${PROJECT_NAME}.vpk ${VITA_TITLEID} ${PROJECT_NAME}.self
   VERSION ${VITA_VERSION}
   NAME ${VITA_APP_NAME}
   FILE vita/sce_sys/icon0.png sce_sys/icon0.png
+  FILE vita/sce_sys/pic0.png sce_sys/pic0.png
   FILE vita/sce_sys/livearea/contents/bg.png sce_sys/livearea/contents/bg.png
   FILE vita/sce_sys/livearea/contents/startup.png sce_sys/livearea/contents/startup.png
   FILE vita/sce_sys/livearea/contents/template.xml sce_sys/livearea/contents/template.xml

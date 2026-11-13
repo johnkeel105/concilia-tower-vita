@@ -10831,7 +10831,9 @@ int main(int argc, char *argv[])
             return CT_FAIL("Renderer lacks required target-texture support.");
     }
     /* Exercise drawing/shader setup before decoding hundreds of textures. */
-    SDL_SetRenderDrawColor(game.renderer, 14, 22, 48, 255);
+    /* Black (was navy 14,22,48, which stayed on screen as a solid blue
+     * frame through font/sprite/audio loading). */
+    SDL_SetRenderDrawColor(game.renderer, 0, 0, 0, 255);
     if (SDL_RenderClear(game.renderer) != 0) return CT_FAIL("Initial renderer clear failed.");
     CT_BOOT("initial blank frame present begin");
     SDL_RenderPresent(game.renderer);
@@ -10869,6 +10871,26 @@ int main(int argc, char *argv[])
     if (!game.font || !game.font_small || !game.font_info || !game.font_dlg)
         return vita_boot_fatal("Packaged fonts failed to load. Reinstall VPK; see boot.log.");
 #endif
+    /* Loading frame: black with small light-gray "Loading..." bottom-right,
+     * presented once so it stays up during sprite decode and audio init. */
+    {
+        SDL_SetRenderDrawColor(game.renderer, 0, 0, 0, 255);
+        SDL_RenderClear(game.renderer);
+        TTF_Font *lf = game.font_small ? game.font_small : game.font;
+        SDL_Surface *ls = lf ? TTF_RenderUTF8_Blended(lf, "Loading...", (SDL_Color){210, 210, 210, 255}) : NULL;
+        if (ls) {
+            SDL_Texture *lt = SDL_CreateTextureFromSurface(game.renderer, ls);
+            int lw = 960, lh = 544;
+#ifndef __vita__
+            SDL_GetRendererOutputSize(game.renderer, &lw, &lh);
+#endif
+            SDL_Rect d = { lw - ls->w - 14, lh - ls->h - 10, ls->w, ls->h };
+            if (lt) { SDL_RenderCopy(game.renderer, lt, NULL, &d); SDL_DestroyTexture(lt); }
+            SDL_FreeSurface(ls);
+        }
+        SDL_RenderPresent(game.renderer);
+        CT_BOOT("loading frame presented (black + Loading...)");
+    }
     
     /* Load sprites */
 #ifdef __vita__
@@ -11560,7 +11582,7 @@ int main(int argc, char *argv[])
 #ifdef __vita__
     game.tool_x=MAP_WIN_W+12;game.tool_y=MENU_BAR_H+8;
     game.info_x=game.screen_w-(int)lroundf(INFO_BAR_W*1.1f);
-    CT_BOOT("UI v0.10 Tools=%d%% (Tool Sizing) Tower Info=1.10 Map/menu/dialogs=1.00; cached GPU panels, nearest",tool_size_pct);
+    CT_BOOT("UI v0.11 Tools=%d%% (Tool Sizing) Tower Info=1.10 Map/menu/dialogs=1.00; cached GPU panels, nearest",tool_size_pct);
 #endif
     game.win_dragging = 0;
     game.tool_popup = -1;
