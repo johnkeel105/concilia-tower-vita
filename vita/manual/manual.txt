@@ -59,8 +59,12 @@ until a vitatower.sav exists. Game > Save As... lets you pick a slot
 (tower-01.sav ... tower-16.sav) or overwrite an existing save. Game >
 Load lists every .sav file in ux0:data/concilia-tower/.
 Game > New Tower asks if you want to save first: Yes opens Save As
-(then starts a new tower after a successful save); No starts a new
-tower without saving; Cancel keeps the current tower.
+(then opens New Construction after a successful save); No opens
+New Construction without saving; Cancel keeps the current tower.
+New Construction sets the tower name (default Vita Tower) and
+architect. Build Tower starts the new tower; Cancel keeps the
+current one. The tower name appears on Tower Info and becomes the
+default save file (spaces become underscores, e.g. Vita_Tower.sav).
 Each save keeps three older backups (.1 .2 .3). Export .TDT writes an
 original-format tower file that other SimTower versions can open.
 Saves and boot.log stay in ux0:data/concilia-tower/ for all versions.

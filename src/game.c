@@ -4198,6 +4198,53 @@ void game_update_santa(GameSim *sim)
                            * v2: hotel condition/demand fields in Tenant,
                              hotel_pass_day in GameSim */
 
+#define ID_MAGIC 0x4D4E5443u  /* "CTNM" */
+#define ID_VER   1u
+static char g_tower_name[CT_IDENTITY_NAME_MAX];
+static char g_architect[CT_IDENTITY_NAME_MAX];
+
+void game_identity_clear(void)
+{
+    g_tower_name[0] = 0;
+    g_architect[0] = 0;
+}
+void game_identity_set(const char *tower_name, const char *architect)
+{
+    snprintf(g_tower_name, sizeof g_tower_name, "%s", tower_name ? tower_name : "");
+    snprintf(g_architect, sizeof g_architect, "%s", architect ? architect : "");
+}
+void game_identity_get(char *tower_name, size_t tsize,
+                       char *architect, size_t asize)
+{
+    if (tower_name && tsize) snprintf(tower_name, tsize, "%s", g_tower_name);
+    if (architect && asize) snprintf(architect, asize, "%s", g_architect);
+}
+static void identity_write(FILE *f, int *ok)
+{
+    if (!*ok) return;
+    uint32_t ih[2] = { ID_MAGIC, ID_VER };
+    *ok = fwrite(ih, sizeof ih, 1, f) == 1 &&
+          fwrite(g_tower_name, sizeof g_tower_name, 1, f) == 1 &&
+          fwrite(g_architect, sizeof g_architect, 1, f) == 1;
+}
+static void identity_read(FILE *f, int ok)
+{
+    /* Only replace names when this load actually succeeded. A failed
+     * load leaves the current tower (and its names) alone. */
+    if (!ok) return;
+    game_identity_clear();
+    uint32_t ih[2];
+    if (fread(ih, sizeof ih, 1, f) != 1 || ih[0] != ID_MAGIC || ih[1] != ID_VER)
+        return;
+    if (fread(g_tower_name, sizeof g_tower_name, 1, f) != 1 ||
+        fread(g_architect, sizeof g_architect, 1, f) != 1) {
+        game_identity_clear();
+        return;
+    }
+    g_tower_name[sizeof g_tower_name - 1] = 0;
+    g_architect[sizeof g_architect - 1] = 0;
+}
+
 static int game_save_impl(const GameSim *sim, const Tower *tower, const char *path)
 {
     /* Write to a temp file first, then rotate generations and rename into
@@ -4217,6 +4264,7 @@ static int game_save_impl(const GameSim *sim, const Tower *tower, const char *pa
              fwrite(tower, sizeof(*tower), 1, f) == 1 &&
              fwrite(sim, sizeof(*sim), 1, f) == 1 &&
              fwrite(&TUNING, sizeof(TUNING), 1, f) == 1;
+    identity_write(f, &ok);
     if (fclose(f) != 0) ok = 0;
     if (!ok) { remove(tmp); return -1; }
     remove(gen3);
@@ -4426,6 +4474,7 @@ static int game_load_impl(GameSim *sim, Tower *tower, const char *path)
             sim->recycling_adequate = 0;
         }
     }
+    identity_read(f, ok);
     fclose(f);
     /* Turbo lost its UI entry (speed capped at FAST, 2026-07-29) —
      * clamp saves made before the cap. */

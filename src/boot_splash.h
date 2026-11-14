@@ -34,6 +34,14 @@ void ct_boot_splash_notice(void *fb, int pitch_px, int fb_h,
  * in the bottom-right with a light drop shadow (no box). */
 void ct_boot_splash_present(SDL_Renderer *r, TTF_Font *font);
 
+/* Draw the splash (and optional "Loading...") over the current framebuffer
+ * at the given opacity, without clearing or presenting. Used to fade the
+ * load art out over the first gameplay frame. */
+void ct_boot_splash_draw(SDL_Renderer *r, TTF_Font *font, unsigned char alpha);
+
+/* Load the first readable PNG in paths[] as an SDL texture (original size). */
+SDL_Texture *ct_load_png_texture(SDL_Renderer *r, const char *const *paths);
+
 #ifdef __cplusplus
 }
 #endif

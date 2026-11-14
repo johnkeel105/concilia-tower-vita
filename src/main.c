@@ -34,6 +34,9 @@
 #include "strings.h"
 #ifdef __vita__
 #include <strings.h>
+#include <ctype.h>
+#include <stdint.h>
+#include <psp2/ime_dialog.h>
 #include "vita_platform.h"
 #include "boot_splash.h"
 #define CT_BOOT(...) vita_boot_log(__VA_ARGS__)
@@ -4592,6 +4595,27 @@ static void cancel_pending_new_tower(void);
 static void request_new_tower(void);
 static void render_new_tower_confirm(void);
 static void new_tower_confirm_click(int mx, int my);
+static void open_new_construction(void);
+static void render_new_construction(void);
+static void new_construction_click(int mx, int my);
+static void new_construction_cancel(void);
+static void boot_fade_skip(void);
+#define NC_TOWER_MAX 40
+#define NC_ARCH_MAX  32
+#define NC_PORTRAIT  128
+static int  new_construct_open;
+static int  boot_fade_active;
+static int  boot_pending_new_construct;
+static Uint32 boot_fade_t0;
+#define BOOT_FADE_MS 1800
+static char nc_tower[NC_TOWER_MAX + 1];
+static char nc_arch[NC_ARCH_MAX + 1];
+static int  nc_ime_active, nc_ime_field; /* 1 name, 2 architect */
+static SceWChar16 nc_ime_title[64];
+static SceWChar16 nc_ime_init[64];
+static SceWChar16 nc_ime_buf[64];
+static SDL_Texture *architect_tex;
+static int architect_w, architect_h;
 #endif
 static const char *save_path_override = NULL;
 static const char *save_path(void)
@@ -4661,8 +4685,12 @@ static void render_info_window(void)
     int wx = game.info_x;
     int wy = game.info_y;
     
-    /* Title bar for dragging */
-    draw_win31_titlebar(wx, wy, INFO_BAR_W, "Tower Info");
+    /* Title bar for dragging. Show the player's tower name when set. */
+    {
+        char idname[CT_IDENTITY_NAME_MAX];
+        game_identity_get(idname, sizeof idname, NULL, 0);
+        draw_win31_titlebar(wx, wy, INFO_BAR_W, idname[0] ? idname : "Tower Info");
+    }
     wy += WIN_TITLEBAR_H;
     
     /* Background — original uses bitmap 0x8140 (431×41, tiled horizontal) */
@@ -6384,11 +6412,278 @@ static void new_tower_confirm_click(int mx, int my)
         open_save_dialog(1);
     } else if (point_in_rect(mx, my, newt_btn(1))) {
         game.new_tower_confirm = 0;
-        start_new_tower();
+        open_new_construction();
     } else if (point_in_rect(mx, my, newt_btn(2))) {
         game.new_tower_confirm = 0;
         game.sim.speed = game.new_tower_saved_speed;
     }
+}
+
+/* ---- New Construction (name + architect, event-popup chrome) ---- */
+static void tower_name_to_sav(const char *name, char *out, size_t n)
+{
+    char stem[CT_SAVE_NAME_MAX];
+    int j = 0;
+    for (const unsigned char *p = (const unsigned char *)(name ? name : ""); *p && j < (int)sizeof(stem) - 5; p++) {
+        if (*p == ' ' || *p == '\t') {
+            if (j && stem[j - 1] != '_') stem[j++] = '_';
+        } else if (isalnum(*p) || *p == '_' || *p == '-') {
+            stem[j++] = (char)*p;
+        }
+    }
+    stem[j] = 0;
+    char *s = stem;
+    while (*s == '_') s++;
+    char *e = s + strlen(s);
+    while (e > s && e[-1] == '_') *--e = 0;
+    if (!*s) snprintf(out, n, "%s", CT_VITA_DEFAULT_SAVE);
+    else snprintf(out, n, "%s.sav", s);
+}
+
+#define NC_W 520
+#define NC_H 268
+static SDL_Rect nc_rect(void)
+{
+    return (SDL_Rect){ (game.screen_w - NC_W) / 2, (game.screen_h - NC_H) / 2, NC_W, NC_H };
+}
+static SDL_Rect nc_portrait_rect(void)
+{
+    SDL_Rect d = nc_rect();
+    int s = architect_tex ? NC_PORTRAIT : 0;
+    return (SDL_Rect){ d.x + 16, d.y + 16, s, s };
+}
+static SDL_Rect nc_field(int which) /* 0 name, 1 architect */
+{
+    SDL_Rect d = nc_rect();
+    int text_x = d.x + 16 + (architect_tex ? NC_PORTRAIT + 14 : 0);
+    int fy = d.y + 16 + 20 + 40 + 12 + which * 36;
+    return (SDL_Rect){ text_x + 92, fy, d.x + d.w - 18 - (text_x + 92), 26 };
+}
+static SDL_Rect nc_btn(int i) /* 0 Cancel, 1 Build Tower */
+{
+    SDL_Rect d = nc_rect();
+    int bw = 150, bh = 28, gap = 16;
+    int total = 2 * bw + gap;
+    int bx = d.x + d.w - 18 - total;
+    return (SDL_Rect){ bx + i * (bw + gap), d.y + d.h - 18 - bh, bw, bh };
+}
+
+static void utf8_to_u16(const char *s, SceWChar16 *d, int max)
+{
+    int i = 0;
+    const unsigned char *p = (const unsigned char *)(s ? s : "");
+    while (*p && i < max - 1) {
+        unsigned c;
+        if (*p < 0x80) { c = *p++; }
+        else if ((*p & 0xE0) == 0xC0 && p[1]) { c = ((*p & 0x1F) << 6) | (p[1] & 0x3F); p += 2; }
+        else if ((*p & 0xF0) == 0xE0 && p[1] && p[2]) {
+            c = ((*p & 0x0F) << 12) | ((p[1] & 0x3F) << 6) | (p[2] & 0x3F); p += 3;
+        } else { p++; continue; }
+        if (c == 0 || c > 0xFFFF) c = '?';
+        d[i++] = (SceWChar16)c;
+    }
+    d[i] = 0;
+}
+static void u16_to_utf8(const SceWChar16 *s, char *d, size_t max)
+{
+    size_t j = 0;
+    if (!s || !d || !max) return;
+    for (; *s && j + 4 < max; s++) {
+        unsigned c = *s;
+        if (c < 0x80) d[j++] = (char)c;
+        else if (c < 0x800) { d[j++] = (char)(0xC0 | (c >> 6)); d[j++] = (char)(0x80 | (c & 0x3F)); }
+        else { d[j++] = (char)(0xE0 | (c >> 12)); d[j++] = (char)(0x80 | ((c >> 6) & 0x3F)); d[j++] = (char)(0x80 | (c & 0x3F)); }
+    }
+    d[j] = 0;
+}
+
+static void nc_ime_term(void)
+{
+    if (!nc_ime_active) return;
+    sceImeDialogTerm();
+    nc_ime_active = 0;
+    nc_ime_field = 0;
+}
+static void nc_ime_poll(void)
+{
+    if (!nc_ime_active) return;
+    if (sceImeDialogGetStatus() != SCE_COMMON_DIALOG_STATUS_FINISHED) return;
+    SceImeDialogResult res;
+    memset(&res, 0, sizeof res);
+    sceImeDialogGetResult(&res);
+    if (res.button == SCE_IME_DIALOG_BUTTON_ENTER) {
+        if (nc_ime_field == 1) u16_to_utf8(nc_ime_buf, nc_tower, sizeof nc_tower);
+        else if (nc_ime_field == 2) u16_to_utf8(nc_ime_buf, nc_arch, sizeof nc_arch);
+    }
+    nc_ime_term();
+}
+static void nc_ime_start(int field)
+{
+    if (nc_ime_active) nc_ime_term();
+    const char *title = field == 1 ? "Tower Name" : "Architect";
+    const char *init  = field == 1 ? nc_tower : nc_arch;
+    int maxc = field == 1 ? NC_TOWER_MAX : NC_ARCH_MAX;
+    SceImeDialogParam param;
+    sceImeDialogParamInit(&param);
+    param.supportedLanguages = SCE_IME_LANGUAGE_ENGLISH;
+    param.languagesForced = SCE_TRUE;
+    param.type = SCE_IME_TYPE_DEFAULT;
+    param.option = 0;
+    param.dialogMode = SCE_IME_DIALOG_DIALOG_MODE_WITH_CANCEL;
+    param.textBoxMode = SCE_IME_DIALOG_TEXTBOX_MODE_DEFAULT;
+    utf8_to_u16(title, nc_ime_title, (int)(sizeof nc_ime_title / sizeof nc_ime_title[0]));
+    utf8_to_u16(init, nc_ime_init, maxc + 1);
+    memset(nc_ime_buf, 0, sizeof nc_ime_buf);
+    param.title = nc_ime_title;
+    param.maxTextLength = (SceUInt32)maxc;
+    param.initialText = nc_ime_init;
+    param.inputTextBuffer = nc_ime_buf;
+    int rc = sceImeDialogInit(&param);
+    if (rc < 0) {
+        CT_BOOT("IME dialog init failed: 0x%08x", (unsigned)rc);
+        return;
+    }
+    nc_ime_field = field;
+    nc_ime_active = 1;
+}
+
+static void apply_new_tower_identity(void)
+{
+    if (!nc_tower[0]) snprintf(nc_tower, sizeof nc_tower, "Vita Tower");
+    game_identity_set(nc_tower, nc_arch);
+    char sav[CT_SAVE_NAME_MAX];
+    tower_name_to_sav(nc_tower, sav, sizeof sav);
+    if (vita_set_save_name(sav) < 0) {
+        vita_set_save_name(CT_VITA_DEFAULT_SAVE);
+        CT_BOOT("New Construction: fell back to %s", CT_VITA_DEFAULT_SAVE);
+    } else {
+        CT_BOOT("New Construction: default save=%s name=\"%s\" architect=\"%s\"",
+                sav, nc_tower, nc_arch);
+    }
+}
+
+static void open_new_construction(void)
+{
+    game.menu_open = -1;
+    game.dragging = game.cap_drag = 0;
+    audio_stop_loop();
+    new_construct_open = 1;
+    snprintf(nc_tower, sizeof nc_tower, "Vita Tower");
+    nc_arch[0] = 0;
+    nc_ime_term();
+    CT_BOOT("New Construction dialog opened");
+}
+
+static void new_construction_cancel(void)
+{
+    nc_ime_term();
+    new_construct_open = 0;
+    game.sim.speed = game.new_tower_saved_speed;
+}
+
+static void new_construction_build(void)
+{
+    nc_ime_term();
+    start_new_tower();
+    apply_new_tower_identity();
+    new_construct_open = 0;
+    /* A brand-new lot should run; if the previous game was paused, keep that. */
+    game.sim.speed = game.new_tower_saved_speed;
+}
+
+static void render_new_construction(void)
+{
+    if (!new_construct_open) return;
+    SDL_Rect d = nc_rect();
+    draw_dlg_frame(d);
+    SDL_Rect port = nc_portrait_rect();
+    if (architect_tex) {
+        SDL_Rect inner = { port.x, port.y, port.w, port.h };
+        SDL_RenderCopy(game.renderer, architect_tex, NULL, &inner);
+        SDL_SetRenderDrawColor(game.renderer, 40, 40, 40, 255);
+        SDL_RenderDrawRect(game.renderer, &inner);
+        SDL_Rect inset = { inner.x + 1, inner.y + 1, inner.w - 2, inner.h - 2 };
+        SDL_SetRenderDrawColor(game.renderer, 20, 20, 20, 255);
+        SDL_RenderDrawRect(game.renderer, &inset);
+    }
+    int text_x = d.x + 16 + (architect_tex ? NC_PORTRAIT + 14 : 0);
+    int text_w = d.x + d.w - 18 - text_x;
+    SDL_Color black = { 0, 0, 0, 255 };
+    draw_text("New Construction!", text_x, d.y + 16, black);
+    draw_text_wrapped("Welcome, Architect! Ready to break ground on your new skyscraper?",
+                      text_x, d.y + 16 + 22, text_w, black);
+    SDL_Rect f0 = nc_field(0), f1 = nc_field(1);
+    /* Labels left of the sunken fields, vertically centered on each row. */
+    if (game.font) {
+        int tw, th;
+        CT_Texture *t = render_text("Tower Name:", black, &tw, &th);
+        if (t) {
+            SDL_Rect r = { f0.x - tw - 8, f0.y + (f0.h - th) / 2, tw, th };
+            CT_RenderCopy(game.renderer, t, NULL, &r);
+            CT_DestroyTexture(t);
+        }
+        t = render_text("Architect:", black, &tw, &th);
+        if (t) {
+            SDL_Rect r = { f1.x - tw - 8, f1.y + (f1.h - th) / 2, tw, th };
+            CT_RenderCopy(game.renderer, t, NULL, &r);
+            CT_DestroyTexture(t);
+        }
+    }
+    draw_field31_text(f0, nc_tower, black);
+    if (nc_arch[0]) draw_field31_text(f1, nc_arch, black);
+    else {
+        draw_field31(f1);
+        SDL_Color faint = { 140, 140, 140, 255 };
+        int tw, th;
+        CT_Texture *t = render_text("Your name", faint, &tw, &th);
+        if (t) {
+            SDL_Rect r = { f1.x + 5, f1.y + (f1.h - th) / 2, tw, th };
+            CT_RenderCopy(game.renderer, t, NULL, &r);
+            CT_DestroyTexture(t);
+        }
+    }
+    draw_btn31(nc_btn(0), "Cancel", 0, 1);
+    draw_btn31(nc_btn(1), "Build Tower", 1, 1);
+}
+
+static void new_construction_click(int mx, int my)
+{
+    if (nc_ime_active) return;
+    if (point_in_rect(mx, my, nc_field(0))) { nc_ime_start(1); return; }
+    if (point_in_rect(mx, my, nc_field(1))) { nc_ime_start(2); return; }
+    if (point_in_rect(mx, my, nc_btn(0))) { new_construction_cancel(); return; }
+    if (point_in_rect(mx, my, nc_btn(1))) { new_construction_build(); return; }
+}
+
+static void boot_on_fade_done(void)
+{
+    if (boot_pending_new_construct) {
+        boot_pending_new_construct = 0;
+        game.new_tower_saved_speed = game.sim.speed;
+        game.sim.speed = SPEED_PAUSED;
+        open_new_construction();
+    }
+}
+static void boot_fade_skip(void)
+{
+    if (!boot_fade_active) return;
+    boot_fade_active = 0;
+    CT_BOOT("boot fade skipped");
+    boot_on_fade_done();
+}
+static void boot_fade_draw(void)
+{
+    if (!boot_fade_active) return;
+    Uint32 dt = SDL_GetTicks() - boot_fade_t0;
+    if (dt >= BOOT_FADE_MS) {
+        boot_fade_active = 0;
+        CT_BOOT("boot fade finished (%d ms)", BOOT_FADE_MS);
+        boot_on_fade_done();
+        return;
+    }
+    int a = 255 - (int)((uint64_t)dt * 255u / BOOT_FADE_MS);
+    TTF_Font *lf = game.font_small ? game.font_small : game.font;
+    ct_boot_splash_draw(game.renderer, lf, (unsigned char)a);
 }
 #endif
 
@@ -8743,6 +9038,7 @@ static void render(void)
     render_quit_confirm();     /* topmost — quitting outranks all */
 #ifdef __vita__
     render_new_tower_confirm();
+    render_new_construction();
     render_save_dialog();
     render_manual();
 #endif
@@ -8754,8 +9050,12 @@ static void render(void)
     }
 #endif
 #ifdef __vita__
-    vita_ui_focus_draw();
-    vita_draw_cursor(game.renderer,game.demolish_mode?CT_CURSOR_BULLDOZER:game.inspect_mode?CT_CURSOR_INSPECT:game.finger_mode?CT_CURSOR_HAND:game.build_type!=ITEM_NONE?CT_CURSOR_BUILD:CT_CURSOR_ARROW);
+    nc_ime_poll();
+    if (boot_fade_active) boot_fade_draw();
+    else {
+        vita_ui_focus_draw();
+        vita_draw_cursor(game.renderer,game.demolish_mode?CT_CURSOR_BULLDOZER:game.inspect_mode?CT_CURSOR_INSPECT:game.finger_mode?CT_CURSOR_HAND:game.build_type!=ITEM_NONE?CT_CURSOR_BUILD:CT_CURSOR_ARROW);
+    }
     vita_present(game.renderer);
 #else
     SDL_RenderPresent(game.renderer);
@@ -9300,6 +9600,7 @@ static void start_new_tower(void)
     audio_stop_all();
     tower_init(&game.tower);
     game_init(&game.sim);
+    game_identity_clear();
     add_event_message("New tower started.");
 }
 
@@ -9321,14 +9622,14 @@ static void cancel_pending_new_tower(void)
 
 static void request_new_tower(void)
 {
-    if (!tower_has_progress()) {
-        start_new_tower();
-        return;
-    }
     game.menu_open = -1;
-    game.new_tower_confirm = 1;
     game.new_tower_saved_speed = game.sim.speed;
     game.sim.speed = SPEED_PAUSED;
+    if (!tower_has_progress()) {
+        open_new_construction();
+        return;
+    }
+    game.new_tower_confirm = 1;
 }
 #endif
 
@@ -9378,10 +9679,22 @@ static void open_save_dialog(int mode)
     CT_SaveDirectoryCreate(CT_VITA_SAVE_DIR);
     save_dialog_count=CT_SaveList(CT_VITA_SAVE_DIR,save_dialog_names,96);
     if(save_dialog_count<0) save_dialog_count=0;
-    if(mode==1) for(int i=1;i<=16 && save_dialog_count<96;i++) {
-        char name[CT_SAVE_NAME_MAX];snprintf(name,sizeof(name),"tower-%02d.sav",i);
-        int present=0;for(int n=0;n<save_dialog_count;n++) if(!strcmp(name,save_dialog_names[n])) present=1;
-        if(!present) strcpy(save_dialog_names[save_dialog_count++],name);
+    if(mode==1) {
+        char def[CT_SAVE_NAME_MAX], tname[CT_IDENTITY_NAME_MAX];
+        game_identity_get(tname, sizeof tname, NULL, 0);
+        tower_name_to_sav(tname[0] ? tname : "Vita Tower", def, sizeof def);
+        int present=0;for(int n=0;n<save_dialog_count;n++) if(!strcmp(def,save_dialog_names[n])) present=1;
+        if(!present && save_dialog_count<96) {
+            memmove(save_dialog_names[1], save_dialog_names[0],
+                    (size_t)save_dialog_count * sizeof save_dialog_names[0]);
+            strcpy(save_dialog_names[0], def);
+            save_dialog_count++;
+        }
+        for(int i=1;i<=16 && save_dialog_count<96;i++) {
+            char name[CT_SAVE_NAME_MAX];snprintf(name,sizeof(name),"tower-%02d.sav",i);
+            present=0;for(int n=0;n<save_dialog_count;n++) if(!strcmp(name,save_dialog_names[n])) present=1;
+            if(!present) strcpy(save_dialog_names[save_dialog_count++],name);
+        }
     }
     save_dialog_mode=mode;save_dialog_page=0;game.menu_open=-1;
     game.dragging=game.cap_drag=0;audio_stop_loop();
@@ -9430,7 +9743,7 @@ static void save_dialog_event(SDL_Event *ev)
             if(mode==1) {
                 int ok = do_save_game()==0;
                 if(new_tower_after_saveas) {
-                    if(ok) { new_tower_after_saveas=0; start_new_tower(); }
+                    if(ok) { new_tower_after_saveas=0; open_new_construction(); }
                     else cancel_pending_new_tower();
                 }
             } else do_load_game();
@@ -9740,6 +10053,8 @@ static void cap_drag_track(void)
 static int vita_cancel_surface(void)
 {
     if(manual_open) { manual_close();return 1; }
+    if(nc_ime_active) { nc_ime_term();return 1; }
+    if(new_construct_open) { new_construction_cancel();return 1; }
     if(save_dialog_mode) { save_dialog_mode=0;cancel_pending_new_tower();return 1; }
     if(game.new_tower_confirm) { game.new_tower_confirm=0;game.sim.speed=game.new_tower_saved_speed;return 1; }
     if(game.quit_confirm) { game.quit_confirm=0;game.sim.speed=game.quit_saved_speed;return 1; }
@@ -9789,8 +10104,40 @@ static void handle_event(SDL_Event *ev)
     }
 #endif
 #ifdef __vita__
+    if (boot_fade_active) {
+        switch (ev->type) {
+        case SDL_QUIT: game.running = 0; break;
+        case SDL_KEYDOWN:
+        case SDL_MOUSEBUTTONDOWN:
+        case SDL_CONTROLLERBUTTONDOWN:
+            boot_fade_skip();
+            break;
+        default: break;
+        }
+        return;
+    }
+    if (nc_ime_active) {
+        if (ev->type == SDL_QUIT) game.running = 0;
+        return;
+    }
     if(manual_open) { manual_event(ev);return; }
     if(save_dialog_mode) { save_dialog_event(ev);return; }
+    if (new_construct_open) {
+        switch (ev->type) {
+        case SDL_QUIT: game.running = 0; break;
+        case SDL_MOUSEBUTTONDOWN:
+            if (ev->button.button == SDL_BUTTON_LEFT)
+                new_construction_click(ev->button.x, ev->button.y);
+            break;
+        case SDL_KEYDOWN:
+            if (ev->key.keysym.sym == SDLK_ESCAPE) new_construction_cancel();
+            else if (ev->key.keysym.sym == SDLK_RETURN || ev->key.keysym.sym == SDLK_KP_ENTER)
+                new_construction_build();
+            break;
+        default: break;
+        }
+        return;
+    }
     if (game.new_tower_confirm) {
         switch (ev->type) {
         case SDL_QUIT: game.running = 0; break;
@@ -11019,6 +11366,22 @@ int main(int argc, char *argv[])
         TTF_Font *lf = game.font_small ? game.font_small : game.font;
         ct_boot_splash_present(game.renderer, lf);
         CT_BOOT("loading frame presented (pic0 art + Loading...)");
+        {
+            static const char *apaths[] = {
+                "app0:art/architect.png",
+                "app0:/art/architect.png",
+                "vita/art/architect.png",
+                "art/architect.png",
+                NULL
+            };
+            architect_tex = ct_load_png_texture(game.renderer, apaths);
+            if (architect_tex) {
+                SDL_QueryTexture(architect_tex, NULL, NULL, &architect_w, &architect_h);
+                CT_BOOT("architect portrait ready %dx%d", architect_w, architect_h);
+            } else {
+                CT_BOOT("architect portrait missing; New Construction will skip it");
+            }
+        }
 #else
         SDL_SetRenderDrawColor(game.renderer, 0, 0, 0, 255);
         SDL_RenderClear(game.renderer);
@@ -11070,7 +11433,8 @@ int main(int argc, char *argv[])
                g_sound_capture ? " (capture mode)" : "");
         g_sound_hook = sound_shim;
         if (g_sound_capture) audio_capture_begin();
-        play_snd(SND_STARTUP);          /* intro jingle (referee row 23) */
+        /* Intro jingle is started with the load-art fade, so it lines up
+         * with the first gameplay frame instead of mid-decode. */
     } else {
         CT_BOOT("Audio unavailable; continuing silently: %s", SDL_GetError());
     }
@@ -12042,6 +12406,20 @@ int main(int argc, char *argv[])
     Uint64 previous_frame=SDL_GetPerformanceCounter();
 #endif
     CT_BOOT("startup complete; game loop begin");
+#ifdef __vita__
+    if (!auto_screenshot) {
+        play_snd(SND_STARTUP);          /* intro jingle with the fade */
+        boot_fade_active = 1;
+        boot_fade_t0 = SDL_GetTicks();
+        /* First launch (and any boot that lands on a fresh empty lot)
+         * gets New Construction once the fade finishes. Autoloaded
+         * towers and imports skip it. */
+        if (!demo_mode && !twr_path && !booted_from_save)
+            boot_pending_new_construct = 1;
+        CT_BOOT("boot fade begin (%d ms)%s", BOOT_FADE_MS,
+                boot_pending_new_construct ? "; New Construction after fade" : "");
+    }
+#endif
     while (game.running) {
 #ifdef __vita__
         Uint64 frame_start=SDL_GetPerformanceCounter();
@@ -12051,20 +12429,23 @@ int main(int argc, char *argv[])
         SDL_Event ev;
         while (SDL_PollEvent(&ev)) {
 #ifdef __vita__
-            vita_ui_navigation(vita_ui_collect()?1:game.build_type!=ITEM_NONE?2:0);
+            if (!boot_fade_active && !nc_ime_active)
+                vita_ui_navigation(vita_ui_collect()?1:game.build_type!=ITEM_NONE?2:0);
             vita_input_event(&ev,handle_event);
 #else
             handle_event(&ev);
 #endif
         }
 #ifdef __vita__
-        vita_ui_navigation(vita_ui_collect()?1:game.build_type!=ITEM_NONE?2:0);
-        vita_right_stick_scroll(manual_open);
-        manual_stick_update(frame_dt);
-        if(vita_update_input(frame_dt,&game.cam_fx,&game.cam_fy,handle_event)) game.cam_anim=0;
-        clamp_camera();
-        screen_to_grid(game.mouse_x,game.mouse_y,&game.mouse_floor,&game.mouse_cell);
-        cap_drag_track();
+        if (!boot_fade_active && !nc_ime_active) {
+            vita_ui_navigation(vita_ui_collect()?1:game.build_type!=ITEM_NONE?2:0);
+            vita_right_stick_scroll(manual_open);
+            manual_stick_update(frame_dt);
+            if(vita_update_input(frame_dt,&game.cam_fx,&game.cam_fy,handle_event)) game.cam_anim=0;
+            clamp_camera();
+            screen_to_grid(game.mouse_x,game.mouse_y,&game.mouse_floor,&game.mouse_cell);
+            cap_drag_track();
+        }
 #endif
 
         /* Build-drag clatter (#7001, referee row 18): a looping sound that
@@ -12783,6 +13164,10 @@ int main(int argc, char *argv[])
     CT_BOOT("normal shutdown begin");
     /* Cleanup */
     audio_shutdown();
+#ifdef __vita__
+    nc_ime_term();
+    if (architect_tex) { SDL_DestroyTexture(architect_tex); architect_tex = NULL; }
+#endif
     sprites_free(&game.sprites);
     CT_TextCacheClear();
     if (game.font) TTF_CloseFont(game.font);

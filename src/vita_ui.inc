@@ -21,7 +21,7 @@ static SDL_Rect ui_panel_rect(CT_UIPanel p,SDL_Rect r)
 }
 static int vita_transient_ui(void)
 {
-    return manual_open || save_dialog_mode || game.new_tower_confirm || game.quit_confirm || game.route_confirm || game.notice_modal || game.disaster_modal ||
+    return manual_open || new_construct_open || save_dialog_mode || game.new_tower_confirm || game.quit_confirm || game.route_confirm || game.notice_modal || game.disaster_modal ||
         game.name_edit_open || game.movie_dlg_open || game.find_open || game.menu_open>=0 || game.tool_popup>=0 ||
         game.person_open || game.inspect_open || game.fin_open || game.elv_open || game.show_masspricing || game.show_tuning || game.show_stats;
 }
@@ -37,6 +37,10 @@ static int vita_ui_collect(void)
         if(save_dialog_page) ui_box(r.x+14,r.y+338,76,26);
         if((save_dialog_page+1)*8<save_dialog_count) ui_box(r.x+104,r.y+338,64,26);
         ui_box(r.x+r.w-94,r.y+338,80,26);
+    } else if(new_construct_open) {
+        ui_surface=19;
+        ui_add(nc_field(0),0); ui_add(nc_field(1),0);
+        ui_add(nc_btn(0),0); ui_add(nc_btn(1),0);
     } else if(game.new_tower_confirm) { ui_surface=11;for(int i=0;i<3;i++) ui_add(newt_btn(i),0); }
     else if(game.quit_confirm) { ui_surface=1;for(int i=0;i<3;i++) ui_add(quitc_btn(i),0); }
     else if(game.route_confirm) { ui_surface=2;for(int i=0;i<2;i++) ui_add(route_btn_rect(i),0); }
@@ -129,7 +133,10 @@ static int vita_ui_collect(void)
     }
     if(ui_surface!=ui_last_surface) {
         ui_focus_index=0;ui_last_surface=ui_surface;
-        for(int i=0;i<ui_count;i++) if(point_in_rect(game.mouse_x,game.mouse_y,ui_targets[i])) {ui_focus_index=i;break;}
+        int over=-1;
+        for(int i=0;i<ui_count;i++) if(point_in_rect(game.mouse_x,game.mouse_y,ui_targets[i])) {over=i;break;}
+        if(over>=0) ui_focus_index=over;
+        else if(new_construct_open) ui_focus_index=3; /* Build Tower */
     }
     if(ui_focus_index>=ui_count) ui_focus_index=0;
     return ui_count>0;

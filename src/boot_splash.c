@@ -234,13 +234,16 @@ static SDL_Texture *splash_texture(SDL_Renderer *r)
     return splash_tex;
 }
 
-void ct_boot_splash_present(SDL_Renderer *r, TTF_Font *font)
+void ct_boot_splash_draw(SDL_Renderer *r, TTF_Font *font, unsigned char alpha)
 {
-    if (!r) return;
-    SDL_SetRenderDrawColor(r, 0, 0, 0, 255);
-    SDL_RenderClear(r);
+    if (!r || alpha == 0) return;
     SDL_Texture *tex = splash_texture(r);
-    if (tex) SDL_RenderCopy(r, tex, NULL, NULL);
+    if (tex) {
+        SDL_SetTextureBlendMode(tex, SDL_BLENDMODE_BLEND);
+        SDL_SetTextureAlphaMod(tex, alpha);
+        SDL_RenderCopy(r, tex, NULL, NULL);
+        SDL_SetTextureAlphaMod(tex, 255);
+    }
     if (font) {
         SDL_Color white = { 230, 230, 230, 255 };
         SDL_Color black = { 0, 0, 0, 255 };
@@ -252,6 +255,8 @@ void ct_boot_splash_present(SDL_Renderer *r, TTF_Font *font)
             if (sh) {
                 SDL_Texture *st = SDL_CreateTextureFromSurface(r, sh);
                 if (st) {
+                    SDL_SetTextureBlendMode(st, SDL_BLENDMODE_BLEND);
+                    SDL_SetTextureAlphaMod(st, alpha);
                     SDL_Rect sd = { d.x + 1, d.y + 1, d.w, d.h };
                     SDL_RenderCopy(r, st, NULL, &sd);
                     SDL_DestroyTexture(st);
@@ -259,11 +264,102 @@ void ct_boot_splash_present(SDL_Renderer *r, TTF_Font *font)
                 SDL_FreeSurface(sh);
             }
             SDL_Texture *ft = SDL_CreateTextureFromSurface(r, fg);
-            if (ft) { SDL_RenderCopy(r, ft, NULL, &d); SDL_DestroyTexture(ft); }
+            if (ft) {
+                SDL_SetTextureBlendMode(ft, SDL_BLENDMODE_BLEND);
+                SDL_SetTextureAlphaMod(ft, alpha);
+                SDL_RenderCopy(r, ft, NULL, &d);
+                SDL_DestroyTexture(ft);
+            }
             SDL_FreeSurface(fg);
         } else if (sh) {
             SDL_FreeSurface(sh);
         }
     }
+}
+
+void ct_boot_splash_present(SDL_Renderer *r, TTF_Font *font)
+{
+    if (!r) return;
+    SDL_SetRenderDrawColor(r, 0, 0, 0, 255);
+    SDL_RenderClear(r);
+    ct_boot_splash_draw(r, font, 255);
     SDL_RenderPresent(r);
+}
+
+SDL_Texture *ct_load_png_texture(SDL_Renderer *r, const char *const *paths)
+{
+    if (!r || !paths) return NULL;
+    FILE *fp = NULL;
+    const char *used = NULL;
+    for (int i = 0; paths[i]; i++) {
+        fp = fopen(paths[i], "rb");
+        if (fp) { used = paths[i]; break; }
+    }
+    if (!fp) return NULL;
+
+    png_structp png = png_create_read_struct(PNG_LIBPNG_VER_STRING, NULL, NULL, NULL);
+    png_infop info = png ? png_create_info_struct(png) : NULL;
+    if (!png || !info) {
+        if (png) png_destroy_read_struct(&png, info ? &info : NULL, NULL);
+        fclose(fp);
+        return NULL;
+    }
+    if (setjmp(png_jmpbuf(png))) {
+        png_destroy_read_struct(&png, &info, NULL);
+        fclose(fp);
+        vita_boot_log("png texture: decode failed (%s)", used);
+        return NULL;
+    }
+    png_init_io(png, fp);
+    png_read_info(png, info);
+    png_set_expand(png);
+    png_set_strip_16(png);
+    png_set_gray_to_rgb(png);
+    png_set_packing(png);
+    png_set_add_alpha(png, 0xFF, PNG_FILLER_AFTER);
+    png_read_update_info(png, info);
+
+    int width = (int)png_get_image_width(png, info);
+    int height = (int)png_get_image_height(png, info);
+    int nchan = png_get_channels(png, info);
+    png_size_t rowbytes = png_get_rowbytes(png, info);
+    if (width <= 0 || height <= 0 || nchan < 4 || rowbytes == 0) {
+        png_destroy_read_struct(&png, &info, NULL);
+        fclose(fp);
+        return NULL;
+    }
+    unsigned char *pixels = malloc((size_t)height * rowbytes);
+    if (!pixels) {
+        png_destroy_read_struct(&png, &info, NULL);
+        fclose(fp);
+        return NULL;
+    }
+    png_bytep *rows = malloc((size_t)height * sizeof(*rows));
+    if (!rows) {
+        free(pixels);
+        png_destroy_read_struct(&png, &info, NULL);
+        fclose(fp);
+        return NULL;
+    }
+    for (int y = 0; y < height; y++)
+        rows[y] = pixels + (size_t)y * rowbytes;
+    png_read_image(png, rows);
+    png_read_end(png, NULL);
+    png_destroy_read_struct(&png, &info, NULL);
+    fclose(fp);
+    free(rows);
+
+    SDL_Surface *s = SDL_CreateRGBSurfaceFrom(pixels, width, height, 32, (int)rowbytes,
+                                              0x000000FFu, 0x0000FF00u, 0x00FF0000u, 0xFF000000u);
+    if (!s) { free(pixels); return NULL; }
+    SDL_Texture *tex = SDL_CreateTextureFromSurface(r, s);
+    SDL_FreeSurface(s);
+    free(pixels);
+    if (tex) {
+#if SDL_VERSION_ATLEAST(2, 0, 12)
+        SDL_SetTextureScaleMode(tex, SDL_ScaleModeNearest);
+#endif
+        vita_boot_log("png texture: loaded %s (%dx%d)", used, width, height);
+    }
+    return tex;
 }

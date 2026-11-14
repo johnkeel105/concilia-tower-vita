@@ -16,6 +16,7 @@
 #ifndef GAME_H
 #define GAME_H
 
+#include <stddef.h>
 #include "tower.h"
 #include "people.h"
 
@@ -813,6 +814,14 @@ void game_init(GameSim *sim);
  * Returns 0 on success. */
 int game_save(const GameSim *sim, const Tower *tower, const char *path);
 int game_load(GameSim *sim, Tower *tower, const char *path);
+
+/* Optional tower / architect names, stored as a trailer after the
+ * versioned .sav record so older files keep loading unchanged. */
+#define CT_IDENTITY_NAME_MAX 64
+void game_identity_set(const char *tower_name, const char *architect);
+void game_identity_get(char *tower_name, size_t tsize,
+                       char *architect, size_t asize);
+void game_identity_clear(void);
 
 /* Advance simulation by one frame. Call each frame (~60fps). */
 void game_update(GameSim *sim, Tower *tower);
