@@ -60,7 +60,7 @@ def main(logo, dome, key):
     # over open sky.
     indexed(cover(key, 840, 500, cx=0.5), LA / "bg.png")
     indexed(cover(key, 960, 544), SYS / "pic0.png")
-    # In-game splash (missing-EXE / boot error screen) uses pic0-sized art.
+    # In-game boot splash (EXE check, missing-EXE, loading frame) loads pic0.png.
     for p in (SYS / "icon0.png", LA / "startup.png", LA / "bg.png", SYS / "pic0.png"):
         im = Image.open(p)
         print(p.relative_to(ROOT), im.size, im.mode, p.stat().st_size, "bytes")

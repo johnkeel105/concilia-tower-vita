@@ -35,6 +35,7 @@
 #ifdef __vita__
 #include <strings.h>
 #include "vita_platform.h"
+#include "boot_splash.h"
 #define CT_BOOT(...) vita_boot_log(__VA_ARGS__)
 #define CT_FAIL(reason) vita_boot_fatal(reason)
 #else
@@ -10830,14 +10831,19 @@ int main(int argc, char *argv[])
         if (!(renderer_info.flags & SDL_RENDERER_TARGETTEXTURE))
             return CT_FAIL("Renderer lacks required target-texture support.");
     }
-    /* Exercise drawing/shader setup before decoding hundreds of textures. */
-    /* Black (was navy 14,22,48, which stayed on screen as a solid blue
-     * frame through font/sprite/audio loading). */
+    /* Exercise drawing/shader setup before decoding hundreds of textures.
+     * Present the LiveArea pic0 art immediately so the EXE-check splash
+     * does not flash black when SDL takes the display. */
+#ifdef __vita__
+    ct_boot_splash_present(game.renderer, NULL);
+    CT_BOOT("initial splash frame presented (pic0 art)");
+#else
     SDL_SetRenderDrawColor(game.renderer, 0, 0, 0, 255);
     if (SDL_RenderClear(game.renderer) != 0) return CT_FAIL("Initial renderer clear failed.");
     CT_BOOT("initial blank frame present begin");
     SDL_RenderPresent(game.renderer);
     CT_BOOT("initial blank frame presented");
+#endif
 
 #ifdef __vita__
     SDL_RenderSetLogicalSize(game.renderer,960,544);
@@ -10871,9 +10877,14 @@ int main(int argc, char *argv[])
     if (!game.font || !game.font_small || !game.font_info || !game.font_dlg)
         return vita_boot_fatal("Packaged fonts failed to load. Reinstall VPK; see boot.log.");
 #endif
-    /* Loading frame: black with small light-gray "Loading..." bottom-right,
-     * presented once so it stays up during sprite decode and audio init. */
+    /* Loading frame: same LiveArea pic0 art, with small "Loading..." in the
+     * bottom-right (light drop shadow only) during sprite decode and audio. */
     {
+#ifdef __vita__
+        TTF_Font *lf = game.font_small ? game.font_small : game.font;
+        ct_boot_splash_present(game.renderer, lf);
+        CT_BOOT("loading frame presented (pic0 art + Loading...)");
+#else
         SDL_SetRenderDrawColor(game.renderer, 0, 0, 0, 255);
         SDL_RenderClear(game.renderer);
         TTF_Font *lf = game.font_small ? game.font_small : game.font;
@@ -10881,15 +10892,14 @@ int main(int argc, char *argv[])
         if (ls) {
             SDL_Texture *lt = SDL_CreateTextureFromSurface(game.renderer, ls);
             int lw = 960, lh = 544;
-#ifndef __vita__
             SDL_GetRendererOutputSize(game.renderer, &lw, &lh);
-#endif
             SDL_Rect d = { lw - ls->w - 14, lh - ls->h - 10, ls->w, ls->h };
             if (lt) { SDL_RenderCopy(game.renderer, lt, NULL, &d); SDL_DestroyTexture(lt); }
             SDL_FreeSurface(ls);
         }
         SDL_RenderPresent(game.renderer);
         CT_BOOT("loading frame presented (black + Loading...)");
+#endif
     }
     
     /* Load sprites */

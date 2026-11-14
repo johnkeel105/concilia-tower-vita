@@ -17,7 +17,7 @@ find_package(Freetype REQUIRED)
 
 set(VITA_APP_NAME "Vita Tower")
 set(VITA_TITLEID  "CTWR00001")
-set(VITA_VERSION  "00.14")
+set(VITA_VERSION  "00.15")
 
 execute_process(
   COMMAND git describe --always --dirty
@@ -59,6 +59,7 @@ add_executable(${PROJECT_NAME}
   src/vendor/mspack/system.c
   "$ENV{VITASDK}/share/gcc-arm-vita-eabi/samples/common/debugScreen.c"
   src/vita_platform.c
+  src/boot_splash.c
 )
 
 target_include_directories(${PROJECT_NAME} PRIVATE

@@ -17,6 +17,7 @@
 #include <psp2/io/fcntl.h>
 #include <vitaGL.h>
 #include "debugScreen.h"
+#include "boot_splash.h"
 #include "exe_prepare.h"
 #include "text_cache.h"
 #include "save_store.h"
@@ -124,7 +125,7 @@ void vita_boot_begin(void)
     /* Keep last run available even if the new run fails very early. */
     sceIoRemove(CT_DATA_DIR "/boot.previous.log");
     sceIoRename(CT_DATA_DIR "/boot.log", CT_DATA_DIR "/boot.previous.log");
-    vita_boot_log("Vita Tower v0.14 APP_VER=00.14 build=%s: app start", CT_BUILD_VERSION);
+    vita_boot_log("Vita Tower v0.15 APP_VER=00.15 build=%s: app start", CT_BUILD_VERSION);
     vita_boot_log("kernel process clock available; mkdir ux0:data=0x%08x data dir=0x%08x; log writable=%d",
                   data_rc, dir_rc, log_writable);
     vita_boot_log("newlib heap=%u MiB; startup diagnostics use no SDL/GL", _newlib_heap_size_user >> 20);
@@ -138,6 +139,12 @@ void vita_boot_begin(void)
     vita_boot_log("v0.4 failed shader #7 = SDL GLES2 table type 6 GLES2_SHADER_FRAGMENT_TEXTURE_YUV_JPEG (Cg); unused by this RGB-only game");
     vita_boot_log("installed historical shader #7 source BEGIN\n%s\nsource END", historic_shader ? historic_shader : "(not present)");
     reserve_error_frame();
+    ct_boot_splash_load();
+    if (error_frame_reserved) {
+        ct_boot_splash_blit(error_frame.base, (int)error_frame.pitch, (int)error_frame.height);
+        sceDisplaySetFrameBuf(&error_frame, SCE_DISPLAY_SETBUF_NEXTFRAME);
+        vita_boot_log("boot splash presented on reserved framebuffer (pre-EXE check)");
+    }
     SceUID watchdog = sceKernelCreateThread("ct_boot_watchdog", boot_watchdog,
                                            0x10000100, 64 * 1024, 0, 0, NULL);
     int rc = watchdog < 0 ? watchdog : sceKernelStartThread(watchdog, 0, NULL);
@@ -356,11 +363,15 @@ void vita_frame_finish(Uint64 start,double dt,double sim_ms,double render_ms)
  * Do not SDL_Quit here: cleanup after half-initialized GL can itself crash. */
 void vita_boot_notice(const char *message)
 {
+    char body[1024];
     vita_boot_log("%s", message);
     reserve_error_frame();
-    if (error_frame_reserved) sceDisplaySetFrameBuf(&error_frame, SCE_DISPLAY_SETBUF_NEXTFRAME);
-    if (debug_screen_active)
-        psvDebugScreenPrintf("\e[2J\e[1;1HVita Tower v0.14\n\n%s\n\nLog: ux0:data/concilia-tower/boot.log\n", message);
+    snprintf(body, sizeof(body), "%s\n\nLog: ux0:data/concilia-tower/boot.log", message ? message : "");
+    if (error_frame_reserved) {
+        sceDisplaySetFrameBuf(&error_frame, SCE_DISPLAY_SETBUF_NEXTFRAME);
+        ct_boot_splash_notice(error_frame.base, (int)error_frame.pitch, (int)error_frame.height,
+                              "Vita Tower v0.15", body);
+    }
 }
 
 void vita_boot_notice_end(void)
@@ -380,10 +391,17 @@ int vita_boot_fatal(const char *reason)
     int rc = error_frame_reserved ? sceDisplaySetFrameBuf(&error_frame, SCE_DISPLAY_SETBUF_NEXTFRAME) : -1;
     vita_boot_log("reserved direct framebuffer error screen restore=0x%08x", rc);
     if (rc >= 0) {
-        psvDebugScreenPrintf("\e[2J\e[1;1HVita Tower v0.14 - startup stopped\n\n%s\nSDL diagnostic (may be stale): %s\n\n", reason, error);
-        psvDebugScreenPrintf("Log: ux0:data/concilia-tower/boot.log\nLog writable: %s\n\n", log_writable ? "yes" : "NO - check free space/write access");
-        psvDebugScreenPrintf("EXE search (FOUND = detected, not yet validated):\n%s\n", search_report);
-        psvDebugScreenPrintf("\nSend boot.log and a photo of this screen.\nRelease buttons, then press START or Circle to exit.\n");
+        char body[4600];
+        snprintf(body, sizeof(body),
+                 "%s\nSDL diagnostic (may be stale): %s\n\n"
+                 "Log: ux0:data/concilia-tower/boot.log\nLog writable: %s\n\n"
+                 "EXE search (FOUND = detected, not yet validated):\n%s\n\n"
+                 "Send boot.log and a photo of this screen.\n"
+                 "Release buttons, then press START or Circle to exit.",
+                 reason, error, log_writable ? "yes" : "NO - check free space/write access",
+                 search_report);
+        ct_boot_splash_notice(error_frame.base, (int)error_frame.pitch, (int)error_frame.height,
+                              "Vita Tower v0.15 - startup stopped", body);
     }
     SceCtrlData pad;
     int released = 0;

@@ -530,3 +530,17 @@ Build/package validated; Tyler will confirm v0.9 on hardware. No release/push.
   person / elevator / finance windows, save/load and rename dialogs, top menus
   (including Tool Sizing), modals, Find, and the manual. Fine D-pad nudging
   and build grid steps only happen when no UI has focus.
+
+## v0.15: continuous pic0 boot splash (APP_VER 00.15)
+
+* The EXE-check / missing-EXE / fatal boot notices and the post-SDL loading
+  frame now use the same 960x544 key art as the LiveArea loading picture
+  (`sce_sys/pic0.png`, loaded from `app0:` before any EXE sprites).
+* The reserved debug framebuffer is filled with that art as soon as it is
+  allocated, so the jump from the system pic0 into the app is no longer a
+  black or navy screen. SDL's first present reuses the same art so taking
+  over the display does not flash.
+* "Loading..." stays in the bottom-right during sprite/audio init, with a
+  light 1px drop shadow (no box). EXE-check and fatal text is drawn over the
+  art the same way: white 8x8 debug font with a light shadow only, so the
+  background stays clean.

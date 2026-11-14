@@ -20,7 +20,7 @@ buttons and touch screen, and an in-game manual.
 
 ## Download
 
-- **Latest:** [v0.14-beta](https://github.com/johnkeel105/vita-tower/releases/tag/v0.14-beta) (`VitaTower-v0.14.vpk`)
+- **Latest:** [v0.15-beta](https://github.com/johnkeel105/vita-tower/releases/tag/v0.15-beta) (`VitaTower-v0.15.vpk`)
 - **All builds:** [Releases](https://github.com/johnkeel105/vita-tower/releases) (pre-release betas)
 
 > **No game assets are included.** You must supply your own legally obtained
