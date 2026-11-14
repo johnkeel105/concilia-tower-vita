@@ -37,10 +37,15 @@ Or: `make vita` (same steps).
 3. If the EXE is missing, the app shows an on-screen path reminder and waits
    for START/Circle rather than silently exiting.
 
-The default save remains `ux0:data/concilia-tower/concilliatower.sav`.
+The default save is `ux0:data/concilia-tower/vitatower.sav`. Existing
+`concilliatower.sav` files still load, and remain the current slot when no
+`vitatower.sav` exists yet. The folder path is unchanged so old saves and
+`prefs.cfg` keep working.
 Game > Save As offers numbered `tower-01.sav` ... `tower-16.sav` slots and
 existing `.sav` files; Game > Load lists that same userdata folder. Save uses
 the selected slot for the session. Autosave/exports also stay in userdata.
+Game > New Tower asks to save first when a tower is in progress; Yes opens
+Save As and starts the new tower only after a successful save.
 `--save`, `CT_SAVE`, cwd and `app0:` cannot redirect Vita saves.
 Save/load paths and results are flushed to `ux0:data/concilia-tower/boot.log`.
 
@@ -544,3 +549,21 @@ Build/package validated; Tyler will confirm v0.9 on hardware. No release/push.
   light 1px drop shadow (no box). EXE-check and fatal text is drawn over the
   art the same way: white 8x8 debug font with a light shadow only, so the
   background stays clean.
+
+
+## v0.16: New Tower save prompt, default save name (APP_VER 00.16)
+
+* Game > New Tower no longer wipes a tower in progress instantly. A modal
+  asks "Would you like to save your tower before starting a new one?" with
+  Yes (default, highlighted) / No / Cancel.
+* Yes always opens the Save As slot picker. A successful Save As then
+  starts the new tower; backing out of Save As, or a failed save, stays in
+  the current tower. No starts a new tower without saving. Cancel (or
+  Triangle / Escape) keeps the current tower.
+* The prompt is skipped only on a fresh empty lot (no tenants and lobby
+  height still unlocked). Otherwise it always appears.
+* Controls match other Vita dialogs: D-pad moves the highlight, Circle or
+  Cross confirms the highlighted button, Triangle cancels, touch works.
+  Buttons are the same 26px dialog size as the quit and notice prompts.
+* The default save file is now `vitatower.sav`. `ux0:data/concilia-tower/`
+  is unchanged, and existing `concilliatower.sav` files still load.

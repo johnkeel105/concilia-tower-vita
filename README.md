@@ -20,7 +20,7 @@ buttons and touch screen, and an in-game manual.
 
 ## Download
 
-- **Latest:** [v0.15-beta](https://github.com/johnkeel105/vita-tower/releases/tag/v0.15-beta) (`VitaTower-v0.15.vpk`)
+- **Latest:** [v0.16-beta](https://github.com/johnkeel105/vita-tower/releases/tag/v0.16-beta) (`VitaTower-v0.16.vpk`)
 - **All builds:** [Releases](https://github.com/johnkeel105/vita-tower/releases) (pre-release betas)
 
 > **No game assets are included.** You must supply your own legally obtained
@@ -37,8 +37,10 @@ buttons and touch screen, and an in-game manual.
 3. Launch **Vita Tower** from the LiveArea.
 
 - Saves, preferences and `boot.log` live in **`ux0:data/concilia-tower/`**
-  (title ID `CTWR00001`). Save As offers slots `tower-01.sav` to `tower-16.sav`;
-  older generations are kept as `.1`/`.2`/`.3` backups.
+  (title ID `CTWR00001`). The default save is `vitatower.sav`; existing
+  `concilliatower.sav` files still load. Save As offers slots `tower-01.sav`
+  to `tower-16.sav`; older generations are kept as `.1`/`.2`/`.3` backups.
+  Game > New Tower asks whether to save first (Yes opens Save As).
 - Uses the native GXM renderer: **`libshacccg.suprx` is not required.**
 - Problems? Send `ux0:data/concilia-tower/boot.log`.
 

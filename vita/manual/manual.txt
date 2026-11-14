@@ -53,10 +53,14 @@ enough to stay on screen. The Map is never resized.
 
 ## Saving and loading
 Game > Save writes your current slot. The default save is
-ux0:data/concilia-tower/concilliatower.sav and loads automatically at start.
-Game > Save As... lets you pick a slot (tower-01.sav ... tower-16.sav)
-or overwrite an existing save. Game > Load lists every .sav file in
-ux0:data/concilia-tower/.
+ux0:data/concilia-tower/vitatower.sav.
+Existing concilliatower.sav files still load, and stay the current slot
+until a vitatower.sav exists. Game > Save As... lets you pick a slot
+(tower-01.sav ... tower-16.sav) or overwrite an existing save. Game >
+Load lists every .sav file in ux0:data/concilia-tower/.
+Game > New Tower asks if you want to save first: Yes opens Save As
+(then starts a new tower after a successful save); No starts a new
+tower without saving; Cancel keeps the current tower.
 Each save keeps three older backups (.1 .2 .3). Export .TDT writes an
 original-format tower file that other SimTower versions can open.
 Saves and boot.log stay in ux0:data/concilia-tower/ for all versions.

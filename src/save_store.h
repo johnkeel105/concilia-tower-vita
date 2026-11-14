@@ -2,6 +2,8 @@
 #define CT_SAVE_STORE_H
 #include <stddef.h>
 #define CT_VITA_SAVE_DIR "ux0:data/concilia-tower"
+#define CT_VITA_DEFAULT_SAVE "vitatower.sav"
+#define CT_VITA_LEGACY_SAVE  "concilliatower.sav"
 #define CT_SAVE_NAME_MAX 96
 int CT_SaveDirectoryCreate(const char *root);
 int CT_SavePathBuild(const char *root,const char *name,char *out,size_t size);

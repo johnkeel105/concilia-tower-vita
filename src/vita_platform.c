@@ -162,13 +162,31 @@ void vita_boost_clocks(void)
     vita_boot_log("clock setup status: arm=%d bus=%d gpu=%d xbar=%d; actual MHz ARM=%d bus=%d GPU=%d xbar=%d", arm, bus, gpu, xbar, scePowerGetArmClockFrequency(),scePowerGetBusClockFrequency(),scePowerGetGpuClockFrequency(),scePowerGetGpuXbarClockFrequency());
 }
 
+static char current_save[512]=CT_VITA_SAVE_DIR "/" CT_VITA_DEFAULT_SAVE;
+static int vita_save_file_exists(const char *path)
+{
+    FILE *f = fopen(path, "rb");
+    if (f) { fclose(f); return 1; }
+    return 0;
+}
+
 void vita_prepare_userdata(void)
 {
     int rc = sceIoMkdir(CT_DATA_DIR, 0777);
     vita_boot_log("data dir recheck: 0x%08x (already exists is normal); save directory=%s ready=%d", rc,CT_VITA_SAVE_DIR,CT_SaveDirectoryCreate(CT_VITA_SAVE_DIR));
+    /* Default slot is vitatower.sav. If only a legacy Concilia-named save
+     * exists, keep it as the current slot so old towers still load and
+     * Game > Save updates them. The folder path is unchanged. */
+    char neu[512], oldp[512];
+    if (CT_SavePathBuild(CT_VITA_SAVE_DIR, CT_VITA_DEFAULT_SAVE, neu, sizeof neu) == 0
+        && vita_save_file_exists(neu))
+        strcpy(current_save, neu);
+    else if (CT_SavePathBuild(CT_VITA_SAVE_DIR, CT_VITA_LEGACY_SAVE, oldp, sizeof oldp) == 0
+             && vita_save_file_exists(oldp))
+        strcpy(current_save, oldp);
+    vita_boot_log("active save path=%s", current_save);
 }
 
-static char current_save[512]=CT_VITA_SAVE_DIR "/concilliatower.sav";
 const char *vita_save_path(void) { return current_save; }
 int vita_set_save_name(const char *name)
 {

@@ -550,6 +550,10 @@ typedef struct {
                                         (FileT 10d0:2a8e; strings survey
                                         gap #5) */
     GameSpeed       quit_saved_speed;
+#ifdef __vita__
+    int             new_tower_confirm;     /* save-before-New-Tower prompt */
+    GameSpeed       new_tower_saved_speed;
+#endif
     char            notice_text[192];
     char            notice_btn[32];
     uint16_t        notice_art;      /* sprite id of the dialog's DTMP art
@@ -4578,10 +4582,16 @@ static int  event_msg_total = 0;
  * snapshotted ENV, so an env var can no longer carry it. */
 #ifdef __vita__
 static int save_dialog_mode,save_dialog_page,save_dialog_count;
+static int new_tower_after_saveas; /* Yes on New Tower: Save As, then start new */
 static char save_dialog_names[96][CT_SAVE_NAME_MAX];
 static void open_save_dialog(int mode);
 static void render_save_dialog(void);
 static void save_dialog_event(SDL_Event *ev);
+static void start_new_tower(void);
+static void cancel_pending_new_tower(void);
+static void request_new_tower(void);
+static void render_new_tower_confirm(void);
+static void new_tower_confirm_click(int mx, int my);
 #endif
 static const char *save_path_override = NULL;
 static const char *save_path(void)
@@ -6334,6 +6344,53 @@ static void quit_confirm_click(int mx, int my)
         game.sim.speed = game.quit_saved_speed;
     }
 }
+
+#ifdef __vita__
+/* ---- New Tower save prompt: Yes = Save As, then start new on success ---- */
+#define NEWT_W 420
+#define NEWT_H 140
+
+static SDL_Rect newt_btn(int i)   /* 0 Yes / 1 No / 2 Cancel; 26px like other dialogs */
+{
+    int wx = (game.screen_w - NEWT_W) / 2;
+    int wy = (game.screen_h - NEWT_H) / 2;
+    int bw = 100, bh = 26, gap = 16;
+    int total = 3 * bw + 2 * gap;
+    int bx = wx + (NEWT_W - total) / 2;
+    return (SDL_Rect){ bx + i * (bw + gap), wy + NEWT_H - 40, bw, bh };
+}
+
+static void render_new_tower_confirm(void)
+{
+    if (!game.new_tower_confirm) return;
+    int wx = (game.screen_w - NEWT_W) / 2;
+    int wy = (game.screen_h - NEWT_H) / 2;
+    draw_dlg_frame((SDL_Rect){ wx, wy, NEWT_W, NEWT_H });
+    SDL_Color black = { 0, 0, 0, 255 };
+    draw_text_wrapped("Would you like to save your tower before starting a new one?",
+                      wx + 18, wy + 20, NEWT_W - 36, black);
+    draw_btn31(newt_btn(0), "Yes", 1, 1);   /* default / highlighted */
+    draw_btn31(newt_btn(1), "No", 0, 1);
+    draw_btn31(newt_btn(2), "Cancel", 0, 1);
+}
+
+static void new_tower_confirm_click(int mx, int my)
+{
+    if (point_in_rect(mx, my, newt_btn(0))) {
+        /* Yes: always open Save As. Start the new tower only after a
+         * successful save; backing out of Save As stays in this tower. */
+        game.new_tower_confirm = 0;
+        new_tower_after_saveas = 1;
+        open_save_dialog(1);
+    } else if (point_in_rect(mx, my, newt_btn(1))) {
+        game.new_tower_confirm = 0;
+        start_new_tower();
+    } else if (point_in_rect(mx, my, newt_btn(2))) {
+        game.new_tower_confirm = 0;
+        game.sim.speed = game.new_tower_saved_speed;
+    }
+}
+#endif
 
 /* ---- Route-loss confirmations (res 0x3ed, text verbatim) ----
  * The original pops a system-modal Yes/No MessageBox before a stop-toggle
@@ -8685,6 +8742,7 @@ static void render(void)
     render_route_confirm();    /* likewise */
     render_quit_confirm();     /* topmost — quitting outranks all */
 #ifdef __vita__
+    render_new_tower_confirm();
     render_save_dialog();
     render_manual();
 #endif
@@ -9220,8 +9278,63 @@ static int dropdown_hit_test(int mx, int my)
     return -1;
 }
 
-/* Save/load/export bodies shared by the F-keys and the Game menu. */
-static void do_save_game(void)
+/* Start over (the original's New Tower command). */
+static void start_new_tower(void)
+{
+#ifdef __vita__
+    new_tower_after_saveas = 0;
+    game.new_tower_confirm = 0;
+#endif
+    elv_edit_exit();
+    game.elv_open = 0;
+    game.inspect_tid = 0;
+    /* Hand back the plain pointer: the old game's build tool used to
+     * survive into the fresh lot, where its first stray click silently
+     * locked the lobby-height choice (an EXE quirk placement doesn't
+     * gate) and killed the corner-click egg (Jonah, 2026-08-10). */
+    game.build_type = ITEM_NONE;
+    game.tool_popup = -1;
+    game.dragging = 0;
+    /* The old tower's sounds stop with it (pending queue dies with the
+     * sim memset; this kills the already-ringing voices too). */
+    audio_stop_all();
+    tower_init(&game.tower);
+    game_init(&game.sim);
+    add_event_message("New tower started.");
+}
+
+#ifdef __vita__
+/* Skip the save prompt only when this is still a fresh empty lot
+ * (nothing built, lobby height still unlocked). Otherwise always ask. */
+static int tower_has_progress(void)
+{
+    return game.tower.tenant_count > 0 || game.tower.lobby_height != 0;
+}
+
+static void cancel_pending_new_tower(void)
+{
+    if (new_tower_after_saveas) {
+        new_tower_after_saveas = 0;
+        game.sim.speed = game.new_tower_saved_speed;
+    }
+}
+
+static void request_new_tower(void)
+{
+    if (!tower_has_progress()) {
+        start_new_tower();
+        return;
+    }
+    game.menu_open = -1;
+    game.new_tower_confirm = 1;
+    game.new_tower_saved_speed = game.sim.speed;
+    game.sim.speed = SPEED_PAUSED;
+}
+#endif
+
+/* Save/load/export bodies shared by the F-keys and the Game menu.
+ * Returns 0 on success, -1 on failure (same convention as game_save). */
+static int do_save_game(void)
 {
     /* Never serialize the Simulate mode's transient state (isolated shaft
      * flags, settled car positions): resolve it first, exactly as if
@@ -9232,8 +9345,10 @@ static void do_save_game(void)
         add_event_message("Game saved.");
         game.autosave_blocked = 0;   /* a deliberate save re-arms autosave */
         web_syncfs();
-    } else
-        add_event_message("Save FAILED!");
+        return 0;
+    }
+    add_event_message("Save FAILED!");
+    return -1;
 }
 
 static void do_load_game(void)
@@ -9293,10 +9408,14 @@ static void render_save_dialog(void)
 static void save_dialog_event(SDL_Event *ev)
 {
     if(ev->type==SDL_QUIT) { game.running=0;return; }
-    if(ev->type==SDL_KEYDOWN && (ev->key.keysym.sym==SDLK_ESCAPE || ev->key.keysym.sym==SDLK_F10)) { save_dialog_mode=0;return; }
+    if(ev->type==SDL_KEYDOWN && (ev->key.keysym.sym==SDLK_ESCAPE || ev->key.keysym.sym==SDLK_F10)) {
+        save_dialog_mode=0;cancel_pending_new_tower();return;
+    }
     if(ev->type!=SDL_MOUSEBUTTONDOWN || ev->button.button!=SDL_BUTTON_LEFT) return;
     SDL_Rect r=save_dialog_rect();int x=ev->button.x,y=ev->button.y;
-    if(point_in_rect(x,y,(SDL_Rect){r.x+r.w-94,r.y+338,80,26})) { save_dialog_mode=0;return; }
+    if(point_in_rect(x,y,(SDL_Rect){r.x+r.w-94,r.y+338,80,26})) {
+        save_dialog_mode=0;cancel_pending_new_tower();return;
+    }
     if(point_in_rect(x,y,(SDL_Rect){r.x+14,r.y+338,76,26})) { if(save_dialog_page) save_dialog_page--;return; }
     if(point_in_rect(x,y,(SDL_Rect){r.x+104,r.y+338,64,26})) {
         if((save_dialog_page+1)*8<save_dialog_count) save_dialog_page++;
@@ -9307,7 +9426,15 @@ static void save_dialog_event(SDL_Event *ev)
         if(point_in_rect(x,y,(SDL_Rect){r.x+14,r.y+72+row*29,r.w-28,26})) {
             int mode=save_dialog_mode;
             if(vita_set_save_name(save_dialog_names[i])<0) { CT_BOOT("Chooser rejected unsafe filename");return; }
-            save_dialog_mode=0;if(mode==1) do_save_game();else do_load_game();return;
+            save_dialog_mode=0;
+            if(mode==1) {
+                int ok = do_save_game()==0;
+                if(new_tower_after_saveas) {
+                    if(ok) { new_tower_after_saveas=0; start_new_tower(); }
+                    else cancel_pending_new_tower();
+                }
+            } else do_load_game();
+            return;
         }
     }
 }
@@ -9427,24 +9554,14 @@ static void execute_menu_item(const MenuItem *item)
         game.sim.speed = SPEED_PAUSED;
         break;
     case ACT_NEW_TOWER:
-        /* Start over (the original's New Tower command). The current game
-         * is NOT auto-saved — same as the EXE, which only asks on quit. */
-        elv_edit_exit();
-        game.elv_open = 0;
-        game.inspect_tid = 0;
-        /* Hand back the plain pointer: the old game's build tool used to
-         * survive into the fresh lot, where its first stray click silently
-         * locked the lobby-height choice (an EXE quirk placement doesn't
-         * gate) and killed the corner-click egg (Jonah, 2026-08-10). */
-        game.build_type = ITEM_NONE;
-        game.tool_popup = -1;
-        game.dragging = 0;
-        /* The old tower's sounds stop with it (pending queue dies with the
-         * sim memset; this kills the already-ringing voices too). */
-        audio_stop_all();
-        tower_init(&game.tower);
-        game_init(&game.sim);
-        add_event_message("New tower started.");
+#ifdef __vita__
+        /* Ask to save first when a tower is in progress, so New Tower
+         * cannot silently wipe unsaved work. */
+        request_new_tower();
+#else
+        /* Desktop/web: same as the EXE, which only asks on quit. */
+        start_new_tower();
+#endif
         break;
     case ACT_FINANCE: toggle_fin_dialog(); break;
     case ACT_SAVE:       do_save_game();  break;
@@ -9623,7 +9740,8 @@ static void cap_drag_track(void)
 static int vita_cancel_surface(void)
 {
     if(manual_open) { manual_close();return 1; }
-    if(save_dialog_mode) { save_dialog_mode=0;return 1; }
+    if(save_dialog_mode) { save_dialog_mode=0;cancel_pending_new_tower();return 1; }
+    if(game.new_tower_confirm) { game.new_tower_confirm=0;game.sim.speed=game.new_tower_saved_speed;return 1; }
     if(game.quit_confirm) { game.quit_confirm=0;game.sim.speed=game.quit_saved_speed;return 1; }
     if(game.route_confirm) { route_confirm_close();return 1; }
     if(game.notice_modal) { notice_close();return 1; }
@@ -9673,6 +9791,23 @@ static void handle_event(SDL_Event *ev)
 #ifdef __vita__
     if(manual_open) { manual_event(ev);return; }
     if(save_dialog_mode) { save_dialog_event(ev);return; }
+    if (game.new_tower_confirm) {
+        switch (ev->type) {
+        case SDL_QUIT: game.running = 0; break;
+        case SDL_MOUSEBUTTONDOWN:
+            if (ev->button.button == SDL_BUTTON_LEFT)
+                new_tower_confirm_click(ev->button.x, ev->button.y);
+            break;
+        case SDL_KEYDOWN:
+            if (ev->key.keysym.sym == SDLK_ESCAPE) {
+                game.new_tower_confirm = 0;
+                game.sim.speed = game.new_tower_saved_speed;
+            }
+            break;
+        default: break;
+        }
+        return;
+    }
 #endif
     /* Quit save-prompt: fully modal, topmost. */
     if (game.quit_confirm) {
@@ -11992,7 +12127,7 @@ int main(int argc, char *argv[])
          * clobbering the mode's isolated shaft flags. */
         if (!game.find_open && !game.elv_edit_mode
 #ifdef __vita__
-            && !save_dialog_mode && !manual_open
+            && !save_dialog_mode && !manual_open && !game.new_tower_confirm
 #endif
         ) {
             int prev_hour = game.sim.hour;
