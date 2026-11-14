@@ -1,4 +1,131 @@
-# ConciliaTower
+<p align="center"><img src="docs/art/vita-tower-logo.jpg" alt="Vita Tower: The Vertical Is Portable" width="720"></p>
+
+# Vita Tower
+
+**The Vertical Is Portable.**
+
+> **Vita Tower is a PS Vita port of [Concilia Tower](https://github.com/jonahss/concilia-tower)**,
+> the from-scratch C + SDL2 rewrite of SimTower (Maxis / OpenBook, 1994).
+> All credit for the game engine, the reverse-engineered mechanics and the
+> original Linux/browser port goes to the upstream Concilia Tower project;
+> Vita Tower adds the PS Vita platform layer, controls, UI scaling and art.
+> See [About the engine (Concilia Tower)](#about-the-engine-concilia-tower) below.
+
+Build, staff and grow a skyscraper from an empty lot to a five-star TOWER on a
+PlayStation Vita: offices, condos, hotels, shops, elevators, disasters and all,
+with the original game's mechanics, controls built for the Vita's sticks,
+buttons and touch screen, and an in-game manual.
+
+<p align="center"><img src="docs/art/vita-tower-keyart.jpg" alt="Vita Tower key art: the tower and a helicopter above the city" width="820"></p>
+
+## Download
+
+- **Latest:** [v0.14-beta](https://github.com/johnkeel105/vita-tower/releases/tag/v0.14-beta) (`VitaTower-v0.14.vpk`)
+- **All builds:** [Releases](https://github.com/johnkeel105/vita-tower/releases) (pre-release betas)
+
+> **No game assets are included.** You must supply your own legally obtained
+> copy of **`SIMTOWER.EXE`** (or the original compressed `SIMTOWER.EX_`).
+> Vita Tower reads the original art and sound from it at runtime; the VPK
+> contains no Maxis sprites, sounds or executables.
+
+## Install on a PS Vita
+
+1. On a homebrew-enabled Vita, install the `.vpk` with **VitaShell**.
+2. Copy your own **`SIMTOWER.EXE`** to `ux0:data/concilia-tower/SIMTOWER.EXE`
+   (a KWAJ-compressed `SIMTOWER.EX_`, even one renamed `.EXE`, is expanded
+   automatically on first launch; leave at least 10 MB free).
+3. Launch **Vita Tower** from the LiveArea.
+
+- Saves, preferences and `boot.log` live in **`ux0:data/concilia-tower/`**
+  (title ID `CTWR00001`). Save As offers slots `tower-01.sav` to `tower-16.sav`;
+  older generations are kept as `.1`/`.2`/`.3` backups.
+- Uses the native GXM renderer: **`libshacccg.suprx` is not required.**
+- Problems? Send `ux0:data/concilia-tower/boot.log`.
+
+## Controls (v0.14)
+
+| Input | Outside menus and dialogs |
+|---|---|
+| Left stick | Scroll the camera |
+| Right stick | Move the pointer |
+| Cross or R | Left click (hold to drag, e.g. floors or offices) |
+| L | Right click (hold and move to drag the camera) |
+| Circle | Hand (pointer/select) tool |
+| Triangle | Inspect (magnifying glass) tool |
+| Square | Bulldozer tool |
+| D-pad | Fine pointer nudge; with a build item selected, one tile left/right or one floor up/down (hold to repeat) |
+| Front touch | Tap to click, drag to drag |
+| Start | Open or close the top menu |
+| Select | Debug labels |
+
+| Input | In menus, dialogs and the manual |
+|---|---|
+| D-pad | Move the yellow focus box (the pointer stays where it is) |
+| Cross or Circle | Confirm / press the focused button (OK) |
+| Triangle | Cancel and close without confirming |
+
+Touch and the pointer work everywhere.
+
+## Tool Sizing
+
+The top menu's **Tool Sizing** menu scales the Tools window, its buttons and
+tap areas: **Original size**, **25% larger** (default) or **50% larger**. The
+current choice is check-marked and saved to `ux0:data/concilia-tower/prefs.cfg`.
+If 50% would run off screen with many items unlocked, the window shrinks just
+enough to fit. The Map is never resized.
+
+## Manual
+
+<img src="docs/art/vita-tower-silhouette.jpg" alt="Vita Tower silhouette art" width="420" align="right">
+
+- **In game:** Help > **Vita Tower Manual** opens a scrollable manual
+  (controls, building, tools and Tower Info, Tool Sizing, saving and loading,
+  gameplay tips). D-pad up/down or the right stick scrolls, D-pad left/right
+  changes section, Circle/Triangle close; touch works too.
+- **From the LiveArea:** the system **Manual** has the same pages, drawn over
+  the silhouette art.
+
+<br clear="right">
+
+## Build from source
+
+The Vita port lives on the **[`vita-vpk`](https://github.com/johnkeel105/vita-tower/tree/vita-vpk)** branch; see
+[`docs/VITA.md`](https://github.com/johnkeel105/vita-tower/blob/vita-vpk/docs/VITA.md) there for full details and
+version notes.
+
+```sh
+git clone -b vita-vpk https://github.com/johnkeel105/vita-tower.git && cd vita-tower
+export VITASDK=/usr/local/vitasdk; export PATH=$VITASDK/bin:$PATH
+cmake -S . -B build-vita && cmake --build build-vita -j4   # -> build-vita/concilia-tower.vpk
+```
+
+Requires [VitaSDK](https://vitasdk.org/) (with SDL2 and SDL2_ttf). Never commit
+or package `SIMTOWER.EXE`/`.EX_`, CD images or `*.suprx` modules.
+
+## Credits
+
+<img src="docs/art/vita-tower-dome.jpg" alt="Vita Tower dome art" width="160" align="right">
+
+- **Concilia Tower** ([upstream](https://github.com/jonahss/concilia-tower),
+  [play in the browser](https://kvetch.io/conciliatower/)): the game engine,
+  the reverse-engineered mechanics and the Linux/WebAssembly port, built by
+  Claw (see below). Vita Tower
+  is built directly on it.
+- **Vita Tower:** PS Vita port, controls and UI by johnkeel105; art by Tyler.
+- **SimTower** © its respective rights holders (Maxis / OpenBook / Vivarium).
+  Not affiliated with or endorsed by any rights holder.
+- `src/vendor/mspack/`: a minimal subset of
+  [libmspack](https://www.cabextract.org.uk/libmspack/) (© Stuart Caie, LGPL 2.1).
+- Vita Tower artwork in `docs/art/` and the Vita package is Tyler's own.
+
+<br clear="right">
+
+---
+
+## About the engine (Concilia Tower)
+
+*The rest of this README is the upstream Concilia Tower documentation, kept
+for the engine, desktop build and legal notes.*
 
 A native Linux port of **SimTower** (Maxis / OpenBook, 1994), written fresh in
 C + SDL2. **All of the game code is written from scratch.** The mechanics are
@@ -17,7 +144,7 @@ The goal is a **faithful reproduction of the original mechanics** — population
 growth, tenant satisfaction, elevator dispatch, star ratings, the disasters —
 running natively on Linux, using the original game's own bitmaps and sounds.
 
-## Play it in your browser
+### Play it in your browser
 
 **→ [kvetch.io/conciliatower](https://kvetch.io/conciliatower/)** (mirror: [jonahss.github.io/concilia-tower](https://jonahss.github.io/concilia-tower/))
 
@@ -30,7 +157,7 @@ tells you exactly what to fix if you picked the wrong thing; see
 [docs/SUPPORTED-BUILDS.md](docs/SUPPORTED-BUILDS.md) for the builds we
 recognize and how to report a new one.
 
-## Screenshots
+### Screenshots
 
 Imported original towers, rendered live by the port using assets read from
 `SIMTOWER.EXE`:
@@ -45,7 +172,7 @@ Imported original towers, rendered live by the port using assets read from
 > and sound effects are read **at runtime** (nothing is copied out or
 > redistributed). See [Providing the original EXE](#providing-the-original-exe).
 
-## What this port reuses vs. rewrites
+### What this port reuses vs. rewrites
 
 **Read live from your `SIMTOWER.EXE` at runtime — and *only* this:**
 - All bitmap / sprite assets — read out of the EXE's NE resource table
@@ -70,7 +197,7 @@ Imported original towers, rendered live by the port using assets read from
   original **SimTower 1.1 `.TWR`/`.TDT`** format (`src/twr.c`), so towers
   round-trip and are interchangeable with the original game
 
-## Building
+### Building
 
 Requires a C11 compiler and the SDL2 development libraries.
 
@@ -81,7 +208,7 @@ sudo apt install build-essential libsdl2-dev libsdl2-ttf-dev
 make            # produces ./simtower
 ```
 
-## Providing the original EXE
+### Providing the original EXE
 
 The game reads its art and sound directly from an original `SIMTOWER.EXE` every
 time it launches. You need a legitimately-obtained copy of the file — it is
@@ -121,7 +248,7 @@ If no EXE is found the game exits with:
 Cannot find SIMTOWER.EXE. Pass path as argument.
 ```
 
-## Running
+### Running
 
 ```sh
 ./simtower data/SIMTOWER.EXE
@@ -137,7 +264,7 @@ On a headless machine (e.g. a Raspberry Pi), `scripts/launch.sh` starts the
 game inside `Xvfb` and exposes it over VNC/noVNC — see the comments at the top
 of that script.
 
-## Layout
+### Layout
 
 | Path                | Contents                                              |
 |---------------------|-------------------------------------------------------|
@@ -150,7 +277,7 @@ of that script.
 | `docs/`             | Research notes — original bugs, OpenSkyscraper errata  |
 | `PLAN.md`           | Build plan and phase history (all phases complete)     |
 
-## Documentation
+### Documentation
 
 - **[`PLAN.md`](PLAN.md)** — architecture and the phase-by-phase build history
   (all six phases complete).
@@ -166,7 +293,7 @@ of that script.
 - **[`docs/REFACTOR-PLAN-runtime-model.md`](docs/REFACTOR-PLAN-runtime-model.md)** —
   the runtime-model refactor brief (completed and merged, June 2026).
 
-## Status
+### Status
 
 **Playable end to end.** All six planned build phases are complete
 ([`PLAN.md`](PLAN.md)) — the port goes from an empty lot to the 5⭐ → **TOWER**
@@ -197,7 +324,7 @@ string table (event text is currently hardcoded to matching wording). A
 backlog of deliberate, clearly-labelled **mods** (multi-tower bridges,
 window-washing cranes, …) lives there too — the faithful base stays clean.
 
-## Legal
+### Legal
 
 This is a clean-room-style reimplementation of the game's *code*. It ships no
 Maxis assets and no original executable. SimTower is © its respective rights
